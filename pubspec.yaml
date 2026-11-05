@@ -1,0 +1,46 @@
+﻿name: bus_jam
+description: "Rang barangi buses ka puzzle game."
+publish_to: 'none'
+version: 1.4.1+19
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flame: ^1.38.2
+  audioplayers: ^6.8.1
+  flutter:
+    sdk: flutter
+  google_mobile_ads: ^9.2.0
+  shared_preferences: ^2.5.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Sounds: assets/audio/ mein rakhi har file app mein shamil ho jaati hai
+  assets:
+    - assets/audio/
+    # 3D tasveerein (tool/blender/make_sprites.py se bani)
+    - assets/sprites/
+    - assets/sprites/home_bg_v2.png
+    - assets/sprites/home_bus_v2.png
+    - assets/sprites_v2/
+    - assets/icons/
+    # Hujoom ke 3D log (tool/blender/make_people.py)
+    - assets/people/
+
+  # Fonts (OFL license, files assets/fonts mein; internet se load nahi hote)
+  fonts:
+    - family: Lilita
+      fonts:
+        - asset: assets/fonts/LilitaOne-Regular.ttf
+    - family: Fredoka
+      fonts:
+        - asset: assets/fonts/Fredoka-Variable.ttf

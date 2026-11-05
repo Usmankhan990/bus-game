@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App icon ki 3D peeli car (Blender se bani: render_reference_sprites.py icon).
+     Adaptive icon ke "safe zone" ke andar rakhne ke liye thodi jagah. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/icon_bus"
+    android:inset="10%" />

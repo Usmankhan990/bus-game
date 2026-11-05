@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Splash ka rang (LoadingScreen ke gradient ka upar wala rang) -->
+    <color name="splash_bg">#308CE8</color>
+    <!-- Splash par van ke peeche halka gol -->
+    <color name="splash_icon_bg">#5BB0F5</color>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Splash ki 3D peeli van (Blender se bani: tool/blender/render_reference_sprites.py splash).
+     Android 12+ icon ko gol kaat'ta hai, is liye charon taraf thodi jagah. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/splash_bus"
+    android:inset="16%" />
