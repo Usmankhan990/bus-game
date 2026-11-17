@@ -1,4 +1,4 @@
-﻿# Play Console ke liye saara maal: Bus Jam Party
+# Play Console ke liye saara maal: City Bus Jam
 
 Play Console mein jo field jahan hai, wahan se copy-paste karein. Text English mein hai
 (Play Store par yahi dikhega), samjhane wali baatein Roman Urdu mein.
@@ -14,7 +14,7 @@ Play Console mein jo field jahan hai, wahan se copy-paste karein. Text English m
 | `app-ads.txt` | Website ke root par upload karein (AdMob ke liye) |
 | `build/app/outputs/bundle/release/app-release.aab` | Test and release → **Create new release** |
 
-Screenshots aur feature graphic dobara banane hon: `tool/make_store_listing.dart` (andar tareeqa likha hai).
+Screenshots aur feature graphic dobara banane hon: `flutter test tool/make_store_listing.dart`.
 Icon dobara banana ho: `flutter test tool/make_app_icon.dart`.
 
 ---
@@ -23,14 +23,14 @@ Icon dobara banana ho: `flutter test tool/make_app_icon.dart`.
 
 | Field | Kya likhna hai |
 |---|---|
-| **App name** (30 haroof tak) | `Bus Jam Party - Parking Puzzle` |
+| **App name** (30 haroof tak) | `City Bus Jam` |
 | Default language | English (United States) – en-US |
 | App or game | **Game** |
 | Free or paid | **Free** |
 | Category | **Puzzle** |
 | Tags | Puzzle, Casual, Logic, Brain games |
 | **Developer name** (Play Console account banate waqt) | `CodedHouse` |
-| Contact email | Apna email (yeh Play Store par sab ko dikhta hai) |
+| Contact email | `info@codedhouse.com` (yeh Play Store par sab ko dikhta hai) |
 | Website | GitHub Pages wala link (neeche section 7) |
 
 ## 2) Short description (80 haroof tak)
@@ -44,7 +44,7 @@ Tap cars & buses to clear the parking jam and get every passenger on board!
 ```
 Get ready for the most colorful traffic jam in town! 🚌🚗
 
-Bus Jam Party is a relaxing yet brainy parking puzzle. The lot is packed with cars, vans and long buses – and a big crowd of passengers is waiting at the bus stop. Every vehicle can only drive the way its arrow points. Tap a vehicle with a clear road and watch it drive out to the stop, where passengers of the same color hop on board. When every seat is full, off it goes!
+City Bus Jam is a relaxing yet brainy parking puzzle. The lot is packed with cars, vans and long buses – and a big crowd of passengers is waiting at the bus stop. Every vehicle can only drive the way its arrow points. Tap a vehicle with a clear road and watch it drive out to the stop, where passengers of the same color hop on board. When every seat is full, off it goes!
 
 Sounds easy? The stop has only a few parking spots. Pick the wrong vehicle and the spots fill up fast. Think ahead, choose the right color at the right time and clear the whole jam!
 
@@ -70,7 +70,7 @@ Sounds easy? The stop has only a few parking spots. Pick the wrong vehicle and t
 
 Perfect for a quick break or a long puzzle session. Can you clear every jam?
 
-Download Bus Jam Party now and start tapping! 🎉
+Download City Bus Jam now and start tapping! 🎉
 ```
 
 ## 4) Release notes ("What's new"), har release mein
@@ -121,8 +121,7 @@ hai. Is liye form mein yeh batana zaroori hai:
 
 1. github.com par free account banayein.
 2. Naya repository banayein, naam bilkul yeh: `apnausername.github.io`. Ise **Public** rakhein.
-3. "Add file → Upload files" dabayein aur `privacy_policy.html` aur `app-ads.txt` upload karein.
-   Upload se pehle `privacy_policy.html` mein `YOUR_EMAIL_HERE` ki jagah apna email likhein.
+3. "Add file → Upload files" dabayein aur `privacy_policy.html` (`info@codedhouse.com` is mein pehle se laga hai) aur `app-ads.txt` upload karein.
 4. 5–10 minute baad yeh links chalne lagenge:
    - `https://apnausername.github.io/privacy_policy.html` → Play Console mein privacy policy
    - `https://apnausername.github.io/app-ads.txt` → AdMob ke liye

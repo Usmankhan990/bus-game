@@ -3,6 +3,7 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
+    id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -16,7 +17,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.busjam.bus_jam"
+    namespace = "com.codedhouse.citybusjam"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -25,9 +26,13 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17.toString()
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.busjam.bus_jam"
+        applicationId = "com.codedhouse.citybusjam"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         // google_mobile_ads ko kam az kam Android 7.0 (API 24) chahiye
@@ -36,7 +41,7 @@ android {
 
         // App ka naam (phone par icon ke neeche). Final naam yahan badlein.
         // iOS ke liye ios/Runner/Info.plist mein CFBundleDisplayName bhi badlein.
-        manifestPlaceholders["appName"] = "Bus Jam Party"
+        manifestPlaceholders["appName"] = "City Bus Jam"
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
@@ -69,12 +74,6 @@ android {
                 "proguard-rules.pro",
             )
         }
-    }
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 

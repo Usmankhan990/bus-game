@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/ad_service.dart';
 import '../services/audio_service.dart';
+import '../services/haptic_service.dart';
 import '../ui/candy_button.dart';
 import '../ui/coin_pill.dart';
 import '../ui/game_popup.dart';
@@ -47,7 +48,10 @@ class _WinOverlayState extends State<WinOverlay> {
     super.initState();
     // Popup khulne ke baad coins udaao
     Future<void>.delayed(const Duration(milliseconds: 650), () {
-      if (mounted) setState(() => _flight++);
+      if (mounted) {
+        setState(() => _flight++);
+        AudioService.instance.play(Sfx.coinsCollect);
+      }
     });
   }
 
@@ -58,7 +62,10 @@ class _WinOverlayState extends State<WinOverlay> {
     setState(() {
       _busy = false;
       _doubled = ok;
-      if (ok) _flight++;
+      if (ok) {
+        _flight++;
+        AudioService.instance.play(Sfx.coinsCollect);
+      }
     });
   }
 
@@ -199,7 +206,7 @@ class _FlyingCoinsState extends State<_FlyingCoins>
       ).where((x) => x).length;
       if (landed > _landed) {
         _landed = landed;
-        AudioService.instance.play(Sfx.board, volume: 0.3);
+        HapticService.instance.light();
       }
     });
   }

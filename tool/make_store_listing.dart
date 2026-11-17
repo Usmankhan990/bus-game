@@ -1,22 +1,30 @@
 // Play Store listing ki tasveerein banane wala script:
+// ignore_for_file: invalid_use_of_visible_for_testing_member
 //  * 5 marketing screenshots (1080x1920): rangeen background, bari heading,
 //    aur phone frame mein game ka ASLI screenshot
 //  * feature graphic (1024x500): logo, tagline, 3D van aur game ki gaadiyan
 //
-// Pehle emulator/phone se asli screenshots lein (ads ke baghair build):
-//   flutter build apk --debug --dart-define=STORE_SHOTS=true
-// aur unhein ek folder mein rakhein: home.png, play_start.png, play_board.png,
-// play_dense.png, play_tilted.png (1080 chaude, status bar samait).
-// Phir (project folder mein):
+// Bina kisi argument ke chalayen to app ki asal screens khud capture karta hai:
+//   flutter test tool/make_store_listing.dart
+// Ya agar emulator/phone se RAW screenshots liye hon to unhein bhi frame kar sakta hai:
 //   flutter test tool/make_store_listing.dart --dart-define=RAW=C:/raw/folder
-// Files store_listing/ mein ban jaati hain.
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:bus_jam/game/bus_jam_game.dart';
+import 'package:bus_jam/game/render/sprite_bank.dart';
+import 'package:bus_jam/screens/game_screen.dart';
+import 'package:bus_jam/screens/home_screen.dart';
+import 'package:bus_jam/services/ad_service.dart';
+import 'package:bus_jam/services/progress_service.dart';
+import 'package:bus_jam/ui/theme.dart';
+import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const _raw = String.fromEnvironment('RAW');
 const _out = 'store_listing';
@@ -25,8 +33,8 @@ const _out = 'store_listing';
 const _slides = [
   (
     'home',
-    'Fun Bus Puzzle',
-    'Adventure!',
+    'City Bus Jam',
+    'World Tour!',
     Color(0xFF2F8BEA),
     Color(0xFF6ED3F0),
   ),
@@ -60,9 +68,47 @@ const _slides = [
   ),
 ];
 
+const _assetImages = [
+  'assets/icons/checkin.png',
+  'assets/icons/daily.png',
+  'assets/icons/garage.png',
+  'assets/icons/noads.png',
+  'assets/icons/shop.png',
+  'assets/icons/shuffle.png',
+  'assets/icons/sort.png',
+  'assets/icons/spin.png',
+  'assets/icons/supplies.png',
+  'assets/icons/vip.png',
+  'assets/sprites/city_karachi.png',
+  'assets/sprites/city_lahore.png',
+  'assets/sprites/city_islamabad.png',
+  'assets/sprites/city_dubai.png',
+  'assets/sprites/city_london.png',
+  'assets/sprites/city_paris.png',
+  'assets/sprites/city_newyork.png',
+  'assets/sprites/city_tokyo.png',
+];
+
 Future<ui.Image> _loadFile(String path) async {
   final codec = await ui.instantiateImageCodec(File(path).readAsBytesSync());
   return (await codec.getNextFrame()).image;
+}
+
+Directory? _findMaterialFontsDir() {
+  var dir = File(Platform.resolvedExecutable).parent;
+  for (var i = 0; i < 8; i++) {
+    final candidate = Directory(
+      '${dir.path}/artifacts/material_fonts',
+    );
+    if (candidate.existsSync()) return candidate;
+    final binCache = Directory(
+      '${dir.path}/bin/cache/artifacts/material_fonts',
+    );
+    if (binCache.existsSync()) return binCache;
+    if (dir.parent.path == dir.path) break;
+    dir = dir.parent;
+  }
+  return null;
 }
 
 Future<void> _loadFonts() async {
@@ -71,6 +117,27 @@ Future<void> _loadFonts() async {
   await (FontLoader(
     'Lilita',
   )..addFont(f('assets/fonts/LilitaOne-Regular.ttf'))).load();
+  await (FontLoader(
+    'Fredoka',
+  )..addFont(f('assets/fonts/Fredoka-Variable.ttf'))).load();
+
+  final materialDir = _findMaterialFontsDir();
+  if (materialDir != null) {
+    final icons = File('${materialDir.path}/materialicons-regular.otf');
+    if (icons.existsSync()) {
+      await (FontLoader('MaterialIcons')..addFont(f(icons.path))).load();
+    }
+    final roboto = FontLoader('Roboto');
+    for (final name in [
+      'roboto-regular.ttf',
+      'roboto-medium.ttf',
+      'roboto-bold.ttf',
+    ]) {
+      final rf = File('${materialDir.path}/$name');
+      if (rf.existsSync()) roboto.addFont(f(rf.path));
+    }
+    await roboto.load();
+  }
 }
 
 /// Mota safed text, gehra kinara aur neeche saaya (game ki style)
@@ -170,11 +237,12 @@ void _slide(
     fill: const Color(0xFFFFE15A),
   );
 
-  // Phone frame: screenshot ka upar ka hissa (neeche ki nav patti ke baghair)
+  // Poora phone frame slide ke andar (Home dock aur Booster bar bilkul saaf dikhein)
   final srcH = math.min(shot.height.toDouble(), shot.width * 2.03);
   final src = Rect.fromLTWH(0, 0, shot.width.toDouble(), srcH);
-  const phoneTop = 380.0;
-  final phoneH = s.height - phoneTop + 140; // neeche thoda bahar nikle
+  const phoneTop = 356.0;
+  const phoneBottomMargin = 34.0;
+  final phoneH = s.height - phoneTop - phoneBottomMargin;
   final phoneW = phoneH * src.width / src.height;
   final screen = Rect.fromLTWH(
     (s.width - phoneW) / 2,
@@ -182,20 +250,20 @@ void _slide(
     phoneW,
     phoneH,
   );
-  const bezel = 18.0;
+  const bezel = 16.0;
   final body = RRect.fromRectAndRadius(
     screen.inflate(bezel),
-    const Radius.circular(70),
+    const Radius.circular(62),
   );
   c.drawRRect(
-    body.shift(const Offset(0, 22)),
+    body.shift(const Offset(0, 20)),
     Paint()
       ..color = Colors.black.withValues(alpha: 0.28)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 26),
   );
   c.drawRRect(body, Paint()..color = const Color(0xFF1C1F2A));
   c.save();
-  c.clipRRect(RRect.fromRectAndRadius(screen, const Radius.circular(54)));
+  c.clipRRect(RRect.fromRectAndRadius(screen, const Radius.circular(48)));
   c.drawImageRect(
     shot,
     src,
@@ -299,8 +367,8 @@ void _feature(Canvas c, Size s, ui.Image van, List<ui.Image> cars) {
     }
   }
 
-  word('Bus Jam', const Offset(60, 120), 112);
-  word('Party', const Offset(60, 240), 112);
+  word('City Bus', const Offset(60, 120), 112);
+  word('Jam', const Offset(60, 240), 112);
   _title(c, 'Tap  •  Park  •  Board!', const Offset(265, 345), 40);
 }
 
@@ -319,28 +387,187 @@ Future<void> _save(
     ..writeAsBytesSync(data!.buffer.asUint8List());
 }
 
+Future<void> _pumpSec(WidgetTester t, double s) async {
+  for (var i = 0; i < (s / 0.05).round(); i++) {
+    await t.pump(const Duration(milliseconds: 50));
+  }
+}
+
+Widget _app(GlobalKey key, Widget home) => RepaintBoundary(
+  key: key,
+  child: MaterialApp(
+    debugShowCheckedModeBanner: false,
+    theme: AppTheme.theme,
+    home: home,
+  ),
+);
+
+Future<ui.Image> _captureBoundary(WidgetTester t, GlobalKey key) async {
+  late ui.Image img;
+  await t.runAsync(() async {
+    final b = key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    img = await b.toImage(pixelRatio: 2.625);
+  });
+  return img;
+}
+
+Future<Map<String, ui.Image>> _captureLiveShots(WidgetTester t) async {
+  AdService.enabled = false;
+  t.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    const MethodChannel('xyz.luan/audioplayers.global/events'),
+    (_) async => null,
+  );
+  SharedPreferences.setMockInitialValues({
+    'level': 15,
+    'coins': 1250,
+    'stars': 28,
+    'booster_vip': 3,
+    'booster_sort': 3,
+    'booster_shuffle': 3,
+  });
+  await ProgressService.instance.load();
+  await t.runAsync(SpriteBank.instance.load);
+
+  const dpr = 2.625;
+  t.view.physicalSize = const Size(1080, 2192);
+  t.view.devicePixelRatio = dpr;
+  t.view.padding = const FakeViewPadding(top: 18 * dpr, bottom: 0);
+  addTearDown(t.view.reset);
+
+  final key = GlobalKey();
+  // Precache UI icons and city landmarks before capturing any screen.
+  await t.pumpWidget(_app(key, const SizedBox()));
+  final ctx = t.element(find.byType(SizedBox));
+  await t.runAsync(() async {
+    for (final path in _assetImages) {
+      await precacheImage(AssetImage(path), ctx);
+    }
+  });
+
+  final shots = <String, ui.Image>{};
+
+  // 1) HomeScreen (Level 15 - Karachi roundabout)
+  await t.pumpWidget(_app(key, const HomeScreen(key: ValueKey('home_15'))));
+  await _pumpSec(t, 0.8);
+  shots['home'] = await _captureBoundary(t, key);
+
+  // 2) Play Start (Level 12 - Karachi sunny beach fresh puzzle)
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setInt('level', 12);
+  await ProgressService.instance.load();
+  await t.pumpWidget(_app(key, const GameScreen(key: ValueKey('lvl_12'))));
+  await _pumpSec(t, 1.0);
+  shots['play_start'] = await _captureBoundary(t, key);
+
+  // 3) Play Board (Level 142 - Tokyo sakura, active parked vehicles & boarding)
+  await prefs.setInt('level', 142);
+  await ProgressService.instance.load();
+  await t.pumpWidget(_app(key, const GameScreen(key: ValueKey('lvl_142'))));
+  await _pumpSec(t, 2.5);
+  {
+    final g = t
+        .widget<GameWidget<BusJamGame>>(find.byType(GameWidget<BusJamGame>))
+        .game!;
+    final front = g.model.frontColor;
+    // Pehle 1-2 doosre rang ki khuli gaadiyan normal slots mein bhejein
+    for (final b in g.model.movableBuses().where((b) => b.color != front).take(2)) {
+      await t.tapAt(g.layout.busCenter(b));
+      await _pumpSec(t, 0.25);
+    }
+    // Phir frontColor wali gaadi bhejein (seedha ya VIP se) taa ke musafir live chadhte dikhein
+    final matchingMov = g.model
+        .movableBuses()
+        .where((b) => b.color == front)
+        .toList();
+    if (matchingMov.isNotEmpty) {
+      await t.tapAt(g.layout.busCenter(matchingMov.first));
+    } else {
+      final matchingAny = g.model.grid
+          .where((b) => b.color == front)
+          .toList()
+        ..sort((a, b) => b.length.compareTo(a.length));
+      if (matchingAny.isNotEmpty) {
+        g.vipMode = true;
+        await t.tapAt(g.layout.busCenter(matchingAny.first));
+      }
+    }
+    await _pumpSec(t, 0.9);
+  }
+  shots['play_board'] = await _captureBoundary(t, key);
+
+  // 4) Play Dense (Level 139 - New York dense level)
+  await prefs.setInt('level', 139);
+  await ProgressService.instance.load();
+  await t.pumpWidget(_app(key, const GameScreen(key: ValueKey('lvl_139'))));
+  await _pumpSec(t, 2.6);
+  shots['play_dense'] = await _captureBoundary(t, key);
+
+  // 5) Smart Boosters (Level 84 - London green park, VIP booster active + boarding)
+  await prefs.setInt('level', 84);
+  await ProgressService.instance.load();
+  await t.pumpWidget(_app(key, const GameScreen(key: ValueKey('lvl_84'))));
+  await _pumpSec(t, 2.6);
+  {
+    final g = t
+        .widget<GameWidget<BusJamGame>>(find.byType(GameWidget<BusJamGame>))
+        .game!;
+    final front = g.model.frontColor;
+    final mov = g.model.movableBuses().where((b) => b.color == front).toList();
+    final pick = mov.isNotEmpty
+        ? mov.first
+        : g.model.movableBuses().firstOrNull;
+    if (pick != null) {
+      await t.tapAt(g.layout.busCenter(pick));
+      await _pumpSec(t, 0.7);
+    }
+    await t.tap(find.text('VIP'));
+    await _pumpSec(t, 0.25);
+  }
+  shots['play_tilted'] = await _captureBoundary(t, key);
+
+  await t.pumpWidget(const SizedBox());
+  await _pumpSec(t, 0.2);
+  return shots;
+}
+
 void main() {
   testWidgets('store listing', (tester) async {
+    await tester.runAsync(_loadFonts);
+
+    final liveShots = _raw.isEmpty
+        ? await _captureLiveShots(tester)
+        : <String, ui.Image>{};
+
     await tester.runAsync(() async {
-      await _loadFonts();
-      if (_raw.isNotEmpty) {
-        var n = 0;
-        for (var i = 0; i < _slides.length; i++) {
-          final (name, l1, l2, top, bottom) = _slides[i];
-          // Jo asli screenshot na ho (ya khaali ho) usay chhor do
+      var n = 0;
+      for (var i = 0; i < _slides.length; i++) {
+        final (name, l1, l2, top, bottom) = _slides[i];
+        ui.Image? shot = liveShots[name];
+        if (shot == null && _raw.isNotEmpty) {
           final file = File('$_raw/$name.png');
-          if (!file.existsSync() || file.lengthSync() == 0) continue;
-          final shot = await _loadFile(file.path);
-          n++;
-          await _save(
-            1080,
-            1920,
-            '$_out/screenshots/${n}_$name.png',
-            (c) =>
-                _slide(c, const Size(1080, 1920), shot, l1, l2, top, bottom, i),
-          );
+          if (file.existsSync() && file.lengthSync() > 0) {
+            shot = await _loadFile(file.path);
+          }
         }
+        if (shot == null) continue;
+        n++;
+        await _save(
+          1080,
+          1920,
+          '$_out/screenshots/${n}_$name.png',
+          (c) => _slide(
+            c,
+            const Size(1080, 1920),
+            shot!,
+            l1,
+            l2,
+            top,
+            bottom,
+            i,
+          ),
+        );
       }
+
       final van = await _loadFile('tool/art/splash_bus.png');
       final cars = <ui.Image>[
         for (final (len, col) in [

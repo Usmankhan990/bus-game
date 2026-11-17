@@ -1,15 +1,19 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../game/bus_jam_game.dart';
+import '../game/game_layout.dart';
 import '../game/logic/level_generator.dart';
 import '../game/render/palette.dart';
 import '../models/booster_type.dart';
+import '../models/bus_data.dart';
 import '../models/city.dart';
 import '../services/ad_service.dart';
+import '../services/audio_service.dart';
 import '../services/progress_service.dart';
 import '../ui/candy_button.dart';
 import '../ui/theme.dart';
@@ -35,14 +39,31 @@ class GameScreen extends StatefulWidget {
 
 class _GameScreenState extends State<GameScreen> {
   final ProgressService _progress = ProgressService.instance;
+  static final math.Random _shapeRng = math.Random();
+  static QueueShape? _lastShape;
+
+  static QueueShape _pickShape(int level) {
+    final candidates = [
+      for (final s in QueueShape.values)
+        if (s != _lastShape) s,
+    ];
+    final next = _lastShape == null && level == 1
+        ? QueueShape.circle
+        : candidates[_shapeRng.nextInt(candidates.length)];
+    _lastShape = next;
+    return next;
+  }
 
   late int _level;
   late BusJamGame _game;
   int _gameKey = 0;
+  int _restartVariant = 0;
   _Overlay _overlay = _Overlay.none;
   int _boostersUsed = 0;
   int _reward = 0;
+  int _earnedStars = 3;
   bool _vip = false;
+  bool _bannerDone = false;
   bool _leaving = false;
   String? _toast;
   Timer? _toastTimer;
@@ -55,15 +76,39 @@ class _GameScreenState extends State<GameScreen> {
 
   @override
   void dispose() {
+    AudioService.instance.stop(Sfx.win);
+    AudioService.instance.stop(Sfx.coinsCollect);
+    AudioService.instance.stop(Sfx.levelStart);
+    AudioService.instance.stop(Sfx.carLand);
+    AudioService.instance.resumeMusic();
     _toastTimer?.cancel();
     super.dispose();
   }
 
-  /// Naya level tayyar karo
-  void _start(int level) {
+  static String _colorSignature(List<BusData> buses) =>
+      [for (final b in buses) '${b.id}:${b.color}'].join(',');
+
+  /// Naya level tayyar karo ([restart] par wahi arrangement, sirf rang shuffle)
+  void _start(int level, {bool restart = false}) {
+    AudioService.instance.stop(Sfx.win);
+    AudioService.instance.stop(Sfx.coinsCollect);
+    AudioService.instance.stop(Sfx.levelStart);
+    AudioService.instance.stop(Sfx.carLand);
+    AudioService.instance.resumeMusic();
     _level = level;
+    var data = LevelGenerator.generate(
+      level,
+      variant: restart ? ++_restartVariant : (_restartVariant = 0),
+    );
+    if (restart) {
+      final prev = _colorSignature(_game.level.buses);
+      for (var t = 0; t < 5 && _colorSignature(data.buses) == prev; t++) {
+        data = LevelGenerator.generate(level, variant: ++_restartVariant);
+      }
+    }
     _game = BusJamGame(
-      level: LevelGenerator.generate(level),
+      level: data,
+      queueShape: _pickShape(level),
       callbacks: GameCallbacks(
         onWin: _onWin,
         onFail: _onFail,
@@ -75,18 +120,21 @@ class _GameScreenState extends State<GameScreen> {
     _gameKey++;
     _overlay = _Overlay.none;
     _boostersUsed = 0;
+    _earnedStars = 3;
     _vip = false;
+    _bannerDone = false;
     _leaving = false;
   }
 
-  void _restart() => setState(() => _start(_level));
+  void _restart() => setState(() => _start(_level, restart: true));
 
   void _onWin() {
     if (!mounted) return;
     _reward = AppConfig.winReward(_level);
+    _earnedStars = _stars;
     // Fauran save: app band bhi ho jaye to agla level khula rahe
     _progress.completeLevel(_level, _reward);
-    _progress.addStars(_stars);
+    _progress.addStars(_earnedStars);
     setState(() {
       _overlay = _Overlay.win;
       _vip = false;
@@ -154,6 +202,9 @@ class _GameScreenState extends State<GameScreen> {
   void _home() {
     if (_leaving) return;
     _leaving = true;
+    AudioService.instance.stop(Sfx.win);
+    AudioService.instance.stop(Sfx.coinsCollect);
+    AudioService.instance.resumeMusic();
     Navigator.of(context).pop();
   }
 
@@ -225,7 +276,12 @@ class _GameScreenState extends State<GameScreen> {
     if (ok) _game.unlockSlot();
   }
 
-  int get _stars => _boostersUsed == 0 ? 3 : (_boostersUsed == 1 ? 2 : 1);
+  int get _stars => AppConfig.winStars(
+    boostersUsed: _boostersUsed,
+    slotsUnlocked: _game.slotsUnlocked,
+    revivesUsed: _game.revivesUsed,
+    blockedHits: _game.blockedHits,
+  );
 
   // ---------------- UI ----------------
 
@@ -247,78 +303,83 @@ class _GameScreenState extends State<GameScreen> {
       },
       child: Scaffold(
         backgroundColor: GamePalette.floor,
-        body: Column(
+        body: Stack(
           children: [
-            Expanded(
-              child: Stack(
-                children: [
-                  Column(
+            Column(
+              children: [
+                Expanded(
+                  child: Stack(
                     children: [
-                      Expanded(
-                        child: Stack(
-                          children: [
-                            // Game screen ke bilkul upar se shuru; bar us ke upar tairta hai
-                            Positioned.fill(
-                              child: GameWidget(
-                                key: ValueKey(_gameKey),
-                                game: _game,
-                              ),
-                            ),
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              child: _topBar(),
-                            ),
-                          ],
+                      // Game screen ke bilkul upar se shuru; bar us ke upar tairta hai
+                      Positioned.fill(
+                        child: GameWidget(
+                          key: ValueKey(_gameKey),
+                          game: _game,
                         ),
                       ),
-                      // Boosters ki tray: upar gol kinare, halka saaya
-                      Container(
-                        padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [Color(0xFFF7FAFE), Color(0xFFDCE7F3)],
-                          ),
-                          borderRadius: BorderRadius.vertical(
-                            top: Radius.circular(AppRadius.lg),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Color(0x261B3358),
-                              blurRadius: 10,
-                              offset: Offset(0, -3),
-                            ),
-                          ],
-                        ),
-                        child: BoosterBar(
-                          onTap: _onBooster,
-                          active: _vip ? BoosterType.vip : null,
-                        ),
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: _topBar(),
                       ),
                     ],
                   ),
-                  if (_toast != null) _toastView(_toast!),
-                  // Mushkil level shuru par laal patti
-                  if (difficulty > 0)
-                    Positioned.fill(
-                      child: LevelBanner(
-                        key: ValueKey('banner$_gameKey'),
-                        text: difficulty == 2 ? 'SUPER HARD' : 'HARD',
-                        color: difficulty == 2
-                            ? const Color(0xFF8E1B1B)
-                            : const Color(0xFFE53935),
+                ),
+                // Banner ad bottom bar ke bilkul upar
+                const BannerAdArea(),
+                // Bottom bar (VIP, Sort, Shuffle) sab se neeche
+                SafeArea(
+                  top: false,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xFFF6FAFF), Color(0xFFD7E4F6)],
                       ),
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(AppRadius.lg),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x28152C52),
+                          blurRadius: 12,
+                          offset: Offset(0, -3),
+                        ),
+                      ],
                     ),
-                  if (_overlay != _Overlay.none)
-                    Positioned.fill(child: _overlayView()),
-                ],
-              ),
+                    child: BoosterBar(
+                      onTap: _onBooster,
+                      active: _vip ? BoosterType.vip : null,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            // Banner ki apni alag jagah, game ke neeche
-            const SafeArea(top: false, child: BannerAdArea()),
+            if (_toast != null) _toastView(_toast!),
+            // Mushkil level shuru par laal patti (ek baar dikhne ke baad band)
+            if (difficulty > 0 && !_bannerDone)
+              Positioned.fill(
+                key: ValueKey('banner$_gameKey'),
+                child: LevelBanner(
+                  text: difficulty == 2 ? 'SUPER HARD' : 'HARD',
+                  color: difficulty == 2
+                      ? const Color(0xFF8E1B1B)
+                      : const Color(0xFFE53935),
+                  onFinished: () {
+                    if (mounted && !_bannerDone) {
+                      setState(() => _bannerDone = true);
+                    }
+                  },
+                ),
+              ),
+            if (_overlay != _Overlay.none)
+              Positioned.fill(
+                key: const ValueKey('overlay'),
+                child: _overlayView(),
+              ),
           ],
         ),
       ),
@@ -338,18 +399,17 @@ class _GameScreenState extends State<GameScreen> {
           padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
           child: Row(
             children: [
-              CandyIconButton(
-                size: 42,
-                icon: Icons.refresh_rounded,
-                onPressed: _overlay == _Overlay.none ? _restart : null,
-              ),
               Expanded(
-                child: Center(child: LevelBadge(level: _level)),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: LevelBadge(level: _level),
+                ),
               ),
-              // Sirf debug build: gaadiyon ke hitbox aur raste dikhao
+              const SizedBox(width: 8),
               CandyIconButton(
-                size: 42,
+                size: 44,
                 icon: Icons.pause_rounded,
+                color: const Color(0xFF6674F5),
                 onPressed: _pause,
               ),
             ],
@@ -361,6 +421,7 @@ class _GameScreenState extends State<GameScreen> {
 
   Widget _toastView(String text) {
     return Positioned(
+      key: const ValueKey('toast'),
       left: 24,
       right: 24,
       top: MediaQuery.paddingOf(context).top + 90,
@@ -395,7 +456,7 @@ class _GameScreenState extends State<GameScreen> {
         key: ValueKey('win$_level'),
         level: _level,
         reward: _reward,
-        stars: _stars,
+        stars: _earnedStars,
         onDouble: _doubleCoins,
         onNext: _nextLevel,
       ),

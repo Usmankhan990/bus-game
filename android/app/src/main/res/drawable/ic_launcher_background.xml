@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- App icon ka background: loading screen jaisa neela gradient (upar se neeche) -->
+<!-- App icon ka background: warm sunny cream gradient (app_icon_2.png se matching) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
@@ -10,11 +10,11 @@
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
-                android:startX="54" android:startY="0"
-                android:endX="54" android:endY="108">
-                <item android:offset="0" android:color="#FF308CE8" />
-                <item android:offset="0.5" android:color="#FF4FB8E0" />
-                <item android:offset="1" android:color="#FF1A7AC6" />
+                android:startX="0" android:startY="0"
+                android:endX="108" android:endY="108">
+                <item android:offset="0" android:color="#FFFEEBB0" />
+                <item android:offset="0.5" android:color="#FFFDDFAA" />
+                <item android:offset="1" android:color="#FFFFDDA3" />
             </gradient>
         </aapt:attr>
     </path>

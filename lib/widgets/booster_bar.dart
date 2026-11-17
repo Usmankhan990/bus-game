@@ -17,8 +17,8 @@ Color boosterColor(BoosterType t) => switch (t) {
   BoosterType.shuffle => AppColors.purple,
 };
 
-/// Game screen ke neeche teen bade booster tiles (VIP, Sort, Shuffle).
-/// Har tile par ginti; 0 ho to hara "+" (ad ya coins se lene ke liye).
+/// Game screen ke neeche teen booster tiles (VIP, Sort, Shuffle).
+/// Compact size taa ke neeche space kam le aur board/arena ko zyada jagah mile.
 class BoosterBar extends StatelessWidget {
   const BoosterBar({super.key, required this.onTap, this.active});
 
@@ -31,8 +31,8 @@ class BoosterBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, c) {
-        // Chhoti screen par tiles chhote
-        final size = (c.maxWidth / 4.8).clamp(52.0, 78.0);
+        // Chhoti screen par tiles chhote aur compact (Image 2 jaisa)
+        final size = (c.maxWidth / 6.8).clamp(44.0, 54.0);
         return ListenableBuilder(
           listenable: ProgressService.instance,
           builder: (context, _) => Row(
@@ -44,7 +44,7 @@ class BoosterBar extends StatelessWidget {
                   art: active == t ? null : t.key,
                   compact: true,
                   label: t.title,
-                  color: active == t ? AppColors.red : const Color(0xFF55B7EB),
+                  color: active == t ? AppColors.red : boosterColor(t),
                   count: ProgressService.instance.boosterCount(t),
                   active: active == t,
                   size: size,

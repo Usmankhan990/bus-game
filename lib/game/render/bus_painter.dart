@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -12,6 +13,9 @@ import 'palette.dart';
 class BusPainter {
   static const double widthFactor = 0.8;
 
+  /// Camera tilt shared between directional projection and continuous animations.
+  static final double directionalTiltCos = math.cos(24 * math.pi / 180);
+
   /// Fixed camera projection, shared by cached sprites and their hit regions.
   static void paintDirectional(
     Canvas canvas, {
@@ -20,20 +24,77 @@ class BusPainter {
     required int length,
     required double angle,
   }) {
+    _paintDirectionalShell(
+      canvas,
+      color: color,
+      unit: unit,
+      length: length,
+      angle: angle,
+      blurShadow: true,
+      drawTop: () => paint(canvas, color: color, unit: unit, length: length),
+    );
+  }
+
+  /// Continuous-angle version using a pre-baked top-down [topImage] (fast for
+  /// real-time home-screen curves with zero 22.5-degree snapping).
+  static void paintDirectionalCached(
+    Canvas canvas, {
+    required Color color,
+    required double unit,
+    required int length,
+    required double angle,
+    required ui.Image topImage,
+    required double topUnitW,
+    required double topUnitH,
+    required Paint imagePaint,
+  }) {
+    final dst = Rect.fromCenter(
+      center: Offset.zero,
+      width: topUnitW * unit,
+      height: topUnitH * unit,
+    );
+    final src = Rect.fromLTWH(
+      0,
+      0,
+      topImage.width.toDouble(),
+      topImage.height.toDouble(),
+    );
+    _paintDirectionalShell(
+      canvas,
+      color: color,
+      unit: unit,
+      length: length,
+      angle: angle,
+      blurShadow: false,
+      drawTop: () => canvas.drawImageRect(topImage, src, dst, imagePaint),
+    );
+  }
+
+  static void _paintDirectionalShell(
+    Canvas canvas, {
+    required Color color,
+    required double unit,
+    required int length,
+    required double angle,
+    required bool blurShadow,
+    required VoidCallback drawTop,
+  }) {
     canvas.save();
     canvas.translate(unit * 0.04, unit * 0.10);
-    canvas.scale(1, math.cos(24 * math.pi / 180));
+    canvas.scale(1, directionalTiltCos);
     canvas.rotate(angle);
     final body = Rect.fromCenter(
       center: Offset.zero,
       width: unit * 0.86,
       height: bodyLength(unit, length),
     );
+    final shadowPaint = Paint()..color = const Color(0x300D1631);
+    if (blurShadow) {
+      shadowPaint.maskFilter = MaskFilter.blur(BlurStyle.normal, unit * 0.07);
+    }
     canvas.drawRRect(
       RRect.fromRectAndRadius(body, Radius.circular(unit * 0.16)),
-      Paint()
-        ..color = const Color(0x300D1631)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, unit * 0.07),
+      shadowPaint,
     );
     canvas.restore();
     // Extruded side walls keep the camera depth fixed as the vehicle turns.
@@ -41,9 +102,7 @@ class BusPainter {
     final lengthPx = bodyLength(unit, length);
     Offset project(double x, double y, double lift) => Offset(
       x * math.cos(angle) - y * math.sin(angle),
-      (x * math.sin(angle) + y * math.cos(angle)) *
-              math.cos(24 * math.pi / 180) -
-          lift,
+      (x * math.sin(angle) + y * math.cos(angle)) * directionalTiltCos - lift,
     );
     final corners = [
       Offset(-w / 2, -lengthPx / 2),
@@ -122,9 +181,9 @@ class BusPainter {
     }
     canvas.save();
     canvas.translate(0, -unit * 0.24);
-    canvas.scale(1, math.cos(24 * math.pi / 180));
+    canvas.scale(1, directionalTiltCos);
     canvas.rotate(angle);
-    paint(canvas, color: color, unit: unit, length: length);
+    drawTop();
     canvas.restore();
   }
 

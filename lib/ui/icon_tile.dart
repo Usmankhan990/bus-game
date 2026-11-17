@@ -1,12 +1,14 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../services/audio_service.dart';
 import '../services/haptic_service.dart';
-import 'theme.dart';
 import 'game_art.dart';
+import 'theme.dart';
 
-/// Gol-kinaron wala rangeen tile: bada icon, neeche naam, chahein to
-/// laal notification dot ([dot]) ya ginti ka badge ([count]; 0 par hara "+").
+/// Gol-kinaron wala rangeen tile: chamakdar 3D surface, gentle floating art,
+/// glossy shimmer sweep, notification dot ([dot]) ya count badge ([count]).
 class IconTile extends StatefulWidget {
   const IconTile({
     super.key,
@@ -34,7 +36,7 @@ class IconTile extends StatefulWidget {
   final int? count;
   final double size;
 
-  /// Chalu halat (maslan VIP chunne ka intezar): laal kinara aur halka jhoomna
+  /// Chalu halat (maslan VIP chunne ka intezar): chamakdar kinara aur pulse
   final bool active;
   final Color labelColor;
   final bool enabled;
@@ -45,142 +47,279 @@ class IconTile extends StatefulWidget {
   State<IconTile> createState() => _IconTileState();
 }
 
-class _IconTileState extends State<IconTile> {
+class _IconTileState extends State<IconTile>
+    with SingleTickerProviderStateMixin {
   bool _down = false;
+  late final AnimationController _anim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2400),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncAnim());
+  }
+
+  @override
+  void didUpdateWidget(IconTile old) {
+    super.didUpdateWidget(old);
+    if (old.enabled != widget.enabled || old.active != widget.active) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _syncAnim());
+    }
+  }
+
+  void _syncAnim() {
+    if (!mounted) return;
+    if (widget.enabled) {
+      if (!_anim.isAnimating) _anim.repeat();
+    } else if (_anim.isAnimating) {
+      _anim.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = widget.size;
     final base = widget.enabled ? widget.color : AppColors.grey;
+    final top = Color.lerp(base, Colors.white, 0.32)!;
+    final bottom = Color.lerp(base, Colors.black, 0.08)!;
+    final lip = Color.lerp(base, Colors.black, 0.30)!;
+    final r = s * 0.28;
+    const depth = 4.5;
+    final phase = (widget.label.hashCode % 628) / 100.0;
+
+    Widget buildTile(double t) {
+      final bobY = widget.enabled
+          ? math.sin(t * math.pi * 2 + phase) * 1.8
+          : 0.0;
+      final activeScale = widget.active
+          ? 1.0 + 0.045 * math.sin(t * math.pi * 4)
+          : 1.0;
+      // Offset shimmer sweep per button so all 3 boosters don't flash at once
+      final shifted = (t + (widget.label.hashCode % 5) * 0.16) % 1.0;
+      final shimmerPhase = shifted < 0.42 ? shifted / 0.42 : -1.0;
+
+      final artWidget = widget.art != null
+          ? (widget.compact
+                ? Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      4,
+                      3,
+                      4,
+                      math.max(13, s * 0.25),
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.contain,
+                      child: Transform.scale(
+                        scale: 1.35,
+                        child: GameArt(widget.art!, size: s * 0.74),
+                      ),
+                    ),
+                  )
+                : FittedBox(
+                    fit: BoxFit.contain,
+                    child: Transform.scale(
+                      scale: 1.22,
+                      child: GameArt(widget.art!, size: s * 0.9),
+                    ),
+                  ))
+          : Icon(
+              widget.icon,
+              color: Colors.white,
+              size: s * 0.56,
+              shadows: const [
+                Shadow(color: Color(0x40000000), offset: Offset(0, 1.5)),
+              ],
+            );
+
+      return Transform.scale(
+        scale: activeScale,
+        child: SizedBox(
+          width: s + 10,
+          height: s + 8,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // 3D bottom lip + colored glow shadow
+              Positioned(
+                left: 5,
+                top: 4 + depth,
+                width: s,
+                height: s,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: lip,
+                    borderRadius: BorderRadius.circular(r),
+                    boxShadow: widget.enabled
+                        ? [
+                            BoxShadow(
+                              color:
+                                  (widget.active
+                                          ? const Color(0xFFFF6D00)
+                                          : base)
+                                      .withValues(
+                                        alpha: widget.active ? 0.52 : 0.34,
+                                      ),
+                              blurRadius: widget.active ? 12 : 7,
+                              offset: const Offset(0, 4),
+                            ),
+                          ]
+                        : null,
+                  ),
+                ),
+              ),
+              // Main animated tile face
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 90),
+                curve: Curves.easeOutCubic,
+                left: 5,
+                top: _down ? 4.0 + depth - 1.0 : 4.0,
+                width: s,
+                height: s,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(r),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [top, base, bottom],
+                            stops: const [0.0, 0.52, 1.0],
+                          ),
+                          borderRadius: BorderRadius.circular(r),
+                          border: Border.all(
+                            color: widget.active
+                                ? const Color(0xFFFFEB3B)
+                                : Colors.white.withValues(alpha: 0.72),
+                            width: widget.active ? 2.6 : 1.5,
+                          ),
+                        ),
+                      ),
+                      // Top glass reflection
+                      Positioned(
+                        left: 4,
+                        right: 4,
+                        top: 3,
+                        height: s * 0.36,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(r * 0.8),
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.white.withValues(alpha: 0.36),
+                                Colors.white.withValues(alpha: 0.02),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Diagonal glossy shimmer sweep
+                      if (widget.enabled && shimmerPhase >= 0)
+                        FractionallySizedBox(
+                          widthFactor: 0.45,
+                          alignment: Alignment(
+                            -1.8 + shimmerPhase * 3.6,
+                            0,
+                          ),
+                          child: Transform.rotate(
+                            angle: 0.42,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.white.withValues(alpha: 0.0),
+                                    Colors.white.withValues(alpha: 0.32),
+                                    Colors.white.withValues(alpha: 0.0),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      // Floating inner art / icon
+                      Transform.translate(
+                        offset: Offset(0, _down ? 1.0 : bobY),
+                        child: Center(child: artWidget),
+                      ),
+                      if (widget.compact)
+                        Positioned(
+                          left: 4,
+                          right: 4,
+                          bottom: 2,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: Text(
+                              widget.label,
+                              maxLines: 1,
+                              textAlign: TextAlign.center,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.title(
+                                (s * 0.22).clamp(9.5, 12.5),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              if (widget.dot) const Positioned(right: 0, top: 0, child: _Dot()),
+              if (widget.count != null)
+                Positioned(
+                  right: -2,
+                  top: -2,
+                  child: _CountBadge(count: widget.count!),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (_) => setState(() => _down = true),
+      onTapUp: (_) => setState(() => _down = false),
       onTapCancel: () => setState(() => _down = false),
-      onTapUp: (_) {
-        setState(() => _down = false);
+      onTap: () {
         AudioService.instance.play(Sfx.button, volume: 0.6);
         HapticService.instance.select();
         widget.onTap();
       },
       child: AnimatedScale(
-        scale: _down ? 0.9 : 1,
-        duration: const Duration(milliseconds: 90),
+        scale: _down ? 0.87 : 1.0,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutBack,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: s + 10,
-              height: s + 8,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // 3D tile: neeche gehra kinara
-                  Positioned(
-                    left: 5,
-                    top: 6,
-                    width: s,
-                    height: s,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: AppColors.darker(base, 0.35),
-                        borderRadius: BorderRadius.circular(s * 0.3),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    left: 5,
-                    top: 0,
-                    width: s,
-                    height: s,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [AppColors.lighter(base, 0.35), base],
-                        ),
-                        borderRadius: BorderRadius.circular(s * 0.3),
-                        border: Border.all(
-                          color: widget.active ? AppColors.red : Colors.white,
-                          width: widget.active ? 4 : 3,
-                        ),
-                      ),
-                      child: widget.art != null
-                          ? (widget.compact
-                                // Booster card: icon upar, neeche naam ke liye jagah
-                                ? Padding(
-                                    padding: EdgeInsets.fromLTRB(
-                                      s * 0.08,
-                                      s * 0.02,
-                                      s * 0.08,
-                                      s * 0.24,
-                                    ),
-                                    child: Transform.scale(
-                                      scale: 1.35,
-                                      child: GameArt(
-                                        widget.art!,
-                                        size: s * 0.74,
-                                      ),
-                                    ),
-                                  )
-                                // Home: bara 3D icon, tile se thoda bahar (sticker jaisa)
-                                : Transform.translate(
-                                    offset: Offset(0, -s * 0.04),
-                                    child: Transform.scale(
-                                      scale: 1.22,
-                                      child: GameArt(
-                                        widget.art!,
-                                        size: s * 0.9,
-                                      ),
-                                    ),
-                                  ))
-                          : Icon(
-                              widget.icon,
-                              color: Colors.white,
-                              size: s * 0.56,
-                              shadows: [
-                                Shadow(
-                                  color: AppColors.darker(base, 0.5),
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                    ),
-                  ),
-                  if (widget.compact)
-                    Positioned(
-                      left: 5,
-                      right: 5,
-                      bottom: 5,
-                      child: Center(
-                        child: Text(
-                          widget.label,
-                          style: AppText.title(
-                            (s * 0.18).clamp(11.0, 14.0),
-                            outline: const Color(0xFF36658B),
-                          ),
-                        ),
-                      ),
-                    ),
-                  if (widget.dot)
-                    const Positioned(right: 0, top: -4, child: _Dot()),
-                  if (widget.count != null)
-                    Positioned(
-                      right: -4,
-                      top: -6,
-                      child: _CountBadge(count: widget.count!),
-                    ),
-                ],
-              ),
-            ),
+            widget.enabled
+                ? AnimatedBuilder(
+                    animation: _anim,
+                    builder: (_, _) => buildTile(_anim.value),
+                  )
+                : buildTile(0.0),
             if (!widget.compact) const SizedBox(height: 2),
             if (!widget.compact)
               Text(
                 widget.label,
                 maxLines: 1,
                 style: AppText.title(
-                  (s * 0.22).clamp(11.0, 16.0),
+                  14,
                   color: widget.labelColor,
+                  outlined: widget.labelColor == Colors.white,
                 ),
               ),
           ],
@@ -202,7 +341,7 @@ class _Dot extends StatelessWidget {
       shape: BoxShape.circle,
       border: Border.all(color: Colors.white, width: 2.5),
       boxShadow: const [
-        BoxShadow(color: Color(0x44000000), offset: Offset(0, 1)),
+        BoxShadow(color: Color(0x30000000), blurRadius: 4, offset: Offset(0, 2)),
       ],
     ),
   );
@@ -218,15 +357,22 @@ class _CountBadge extends StatelessWidget {
     return Container(
       constraints: const BoxConstraints(minWidth: 26),
       height: 26,
-      padding: const EdgeInsets.symmetric(horizontal: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 5),
       decoration: BoxDecoration(
         color: empty ? AppColors.green : AppColors.red,
         borderRadius: BorderRadius.circular(13),
         border: Border.all(color: Colors.white, width: 2.5),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x35000000),
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
       ),
       alignment: Alignment.center,
       child: empty
-          ? const Icon(Icons.add_rounded, color: Colors.white, size: 18)
+          ? const Icon(Icons.add_rounded, color: Colors.white, size: 15)
           : Text('$count', style: AppText.title(14)),
     );
   }

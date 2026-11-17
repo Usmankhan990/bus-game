@@ -5,13 +5,13 @@ import '../config/ad_config.dart';
 import '../services/ad_service.dart';
 
 /// Screen ke bilkul neeche standard 320x50 banner ki alag jagah.
-/// Jagah shuru se fix (50 + 12 faasla) rehti hai, is liye ad load hone par
+/// Jagah shuru se fix (50 + 4 faasla) rehti hai, is liye ad load hone par
 /// game ka layout nahi hilta. Gameplay ko nahi dhaanpta.
 class BannerAdArea extends StatefulWidget {
   const BannerAdArea({super.key});
 
-  /// Banner ki kul oonchai (ad 50 + upar 12 ka faasla)
-  static const double reservedHeight = 62;
+  /// Banner ki kul oonchai (ad 50 + upar 4 ka faasla)
+  static const double reservedHeight = 54;
 
   @override
   State<BannerAdArea> createState() => _BannerAdAreaState();
@@ -63,13 +63,11 @@ class _BannerAdAreaState extends State<BannerAdArea> {
     // Ads hi nahi chal sakte (maslan tests) to koi jagah nahi
     if (!AdService.instance.supported) return const SizedBox.shrink();
     final ad = _ad;
-    // Upar 12px ka faasla: booster buttons aur ad ke beech, taa ke
-    // ghalti se ad par click na ho (AdMob policy)
     return Container(
       height: BannerAdArea.reservedHeight,
       width: double.infinity,
       color: const Color(0xFFCDD4DF),
-      padding: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.only(top: 4),
       alignment: Alignment.center,
       child: _loaded && ad != null
           ? SizedBox(width: 320, height: 50, child: AdWidget(ad: ad))

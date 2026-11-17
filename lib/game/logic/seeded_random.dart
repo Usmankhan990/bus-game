@@ -29,6 +29,9 @@ class SeededRandom {
   /// 0 se (max - 1) tak koi number
   int nextInt(int max) => max <= 1 ? 0 : _next() % max;
 
+  /// Aadha-aadha chance (true / false)
+  bool nextBool() => nextInt(2) == 0;
+
   /// 0.0 se 1.0 tak
   double nextDouble() => _next() / 4294967296.0;
 

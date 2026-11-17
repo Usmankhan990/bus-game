@@ -10,7 +10,7 @@ import 'sprite_bank.dart';
 /// Baad mein image lagani ho to sirf yeh file badlein.
 class PassengerPainter {
   /// 3D insaan ki ek world unit screen par passenger size ka kitna guna
-  static const double _walkerScale = 1.55;
+  static const double _walkerScale = 2.30;
 
   /// Logon ki tasveerein kis zaviye se bani (make_people.py ka TILT)
   static const double _walkerTilt = 45 * math.pi / 180;

@@ -54,13 +54,18 @@ class BoardPainter {
   /// zameen par). Jagahen har shehar ke liye pakki (seeded random).
   static void _decor(Canvas canvas, GameLayout l, City city) {
     final s = l.passengerSize;
-    final half = l.bandWidth / 2;
-    // Sadak ke nuqte (faasla naapne ke liye)
+    final half = math.max(l.bandWidth, l.chuteBandWidth) / 2;
+    // Sadak (roundabout + side chutes + gate) ke nuqte (faasla naapne ke liye)
     final road = <Offset>[];
-    for (final m in l.queueRoad.computeMetrics()) {
-      for (var d = 0.0; d < m.length; d += 6) {
-        road.add(m.getTangentForOffset(d)!.position);
+    for (final path in [l.queueRoad, l.leftFeeder, l.rightFeeder]) {
+      for (final m in path.computeMetrics()) {
+        for (var d = 0.0; d < m.length; d += 6) {
+          road.add(m.getTangentForOffset(d)!.position);
+        }
       }
+    }
+    for (var y = l.roundaboutCenter.dy + l.roundaboutRy; y <= l.roadTop; y += 6) {
+      road.add(Offset(l.roundaboutCenter.dx, y));
     }
     final rnd = math.Random(city.index * 7 + 3);
     final kinds = _decorKinds(city);
@@ -102,59 +107,12 @@ class BoardPainter {
         if (ok) spots.add((p, r, kinds[rnd.nextInt(kinds.length)]));
       }
     }
-    // Sadak ke dono kinaron par qataar: street light aur shehar ki chhoti cheez
-    // baari baari (jaise asli shehar ki sadak)
-    final edge = <(Offset, String)>[];
-    final small = _edgeKind(city);
-    var n = 0;
-    for (final m in l.queueRoad.computeMetrics()) {
-      for (var d = s * 1.5; d < m.length; d += s * 2.6) {
-        final tg = m.getTangentForOffset(d)!;
-        final nrm = Offset(-tg.vector.dy, tg.vector.dx);
-        for (final side in const [-1.0, 1.0]) {
-          final p = tg.position + nrm * side * (half + s * 0.42);
-          var ok = !underHud(p) && p.dx > 4 && p.dx < l.width - 4;
-          ok = ok && p.dy > 0 && p.dy < l.roadTop - s * 0.3;
-          for (final q in road) {
-            if ((q - p).distance < half + s * 0.18) {
-              ok = false;
-              break;
-            }
-          }
-          for (final (c, gr) in l.queueGaps) {
-            if ((c - p).distance < gr * 1.4) ok = false;
-          }
-          if ((l.countPillPos - p).distance < s * 2.2) ok = false;
-          for (final (o, _) in edge) {
-            if ((o - p).distance < s * 1.3) ok = false;
-          }
-          if (ok) {
-            edge.add((p, n.isEven ? 'lamp' : small));
-            n++;
-          }
-        }
-      }
-    }
-    for (final (p, kind) in edge) {
-      spots.add((p, s * 0.5, kind));
-    }
-
     // Upar wali cheezen pehle, neeche wali baad mein (sahi parda)
     spots.sort((a, b) => a.$1.dy.compareTo(b.$1.dy));
     for (final (p, r, kind) in spots) {
       _prop(canvas, kind, p, r);
     }
   }
-
-  /// Sadak ke kinare wali chhoti cheez (street light ke saath baari baari)
-  static String _edgeKind(City c) => switch (c) {
-    City.karachi || City.dubai => 'palm',
-    City.tokyo => 'lantern',
-    City.paris => 'topiary',
-    City.islamabad => 'pine',
-    City.lahore => 'flowers',
-    City.london || City.newyork => 'bush',
-  };
 
   static List<String> _decorKinds(City c) => switch (c) {
     City.karachi => ['palm', 'palm', 'lamp', 'umbrella', 'bush'],
@@ -386,185 +344,182 @@ class BoardPainter {
     _road(canvas, l, slotUsed, hasVip, stripFlash);
   }
 
-  /// Shehar ki zameen, kone mein shehar ki nishani aur darakht, aur saanp
-  /// jaisi sleti sadak
+  /// Shehar ki zameen, beech mein gool roundabout plaza aur open-gate sadak (Image 2 jaisa)
   static void _arena(Canvas canvas, GameLayout l, City city) {
+    final area = Rect.fromLTWH(0, 0, l.width, l.roadTop);
     canvas.drawRect(
-      Rect.fromLTWH(0, 0, l.width, l.roadTop),
+      area,
       Paint()
         ..shader = LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [city.ground, city.groundDark],
-        ).createShader(Rect.fromLTWH(0, 0, l.width, l.roadTop)),
+        ).createShader(area),
     );
     _groundTexture(canvas, l, city);
-    // Baayen kone mein shehar ki nishani (3D imarat), daayen kone mein darakht
-    final landmark = SpriteBank.instance.named('city_${city.id}');
-    for (var i = 0; i < l.queueGaps.length; i++) {
-      final (c, r) = l.queueGaps[i];
-      if (r <= 6) continue;
-      if (i == 0 && landmark != null) {
-        // Nishani bari: kone ki khaali jagah se bahar sadak ke kinare tak
-        final s = math.min(r * 5.2, l.width * 0.34);
-        canvas.drawImageRect(
-          landmark,
-          Rect.fromLTWH(
-            0,
-            0,
-            landmark.width.toDouble(),
-            landmark.height.toDouble(),
-          ),
-          Rect.fromCenter(
-            center: c.translate(r * 0.35, -r * 0.9),
-            width: s,
-            height: s,
-          ),
-          SpriteBank.paint,
-        );
-      } else {
-        _blossomTree(
-          canvas,
-          c,
-          r * 0.9,
-          city == City.tokyo
-              ? null
-              : const (Color(0xFF5DB84A), Color(0xFF9BDB7A)),
-        );
-      }
+
+    final c = l.roundaboutCenter;
+    final bw = l.bandWidth;
+    final gateHalfW = l.gateHalfWidth;
+    final roadMetric = l.queueRoadMetric;
+    final roadLen = roadMetric.length;
+    final openD = (gateHalfW + 2).clamp(4.0, roadLen * 0.16);
+    final openTrack = roadMetric.extractPath(openD, roadLen - openD);
+    final gatePos =
+        roadMetric.getTangentForOffset(0)?.position ??
+        Offset(c.dx, c.dy + l.shapeHalfH);
+
+    final chuteBw = l.chuteBandWidth;
+    final chuteShadow = Paint()
+      ..color = const Color(0x22000000)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = chuteBw + 8
+      ..strokeCap = StrokeCap.round;
+    final chuteCurb = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = chuteBw + 7
+      ..strokeCap = StrokeCap.round;
+    final chuteRoad = Paint()
+      ..color = const Color(0xFF86889B)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = chuteBw
+      ..strokeCap = StrokeCap.round;
+
+    final shadowStroke = Paint()
+      ..color = const Color(0x22000000)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = bw + 8
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final curbStroke = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = bw + 7
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final roadStroke = Paint()
+      ..color = const Color(0xFF86889B)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = bw
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final leftFeeder = l.leftFeeder;
+    final rightFeeder = l.rightFeeder;
+
+    // 1) Sab se pehle saaye aur safed kinare (feeders + loop track) taa ke junction seamless bane
+    canvas.drawPath(leftFeeder.shift(const Offset(0, 3)), chuteShadow);
+    canvas.drawPath(rightFeeder.shift(const Offset(0, 3)), chuteShadow);
+    canvas.drawPath(openTrack.shift(const Offset(0, 3)), shadowStroke);
+
+    canvas.drawPath(leftFeeder, chuteCurb);
+    canvas.drawPath(rightFeeder, chuteCurb);
+    canvas.drawPath(openTrack, curbStroke);
+
+    // 2) Open gate corridor neeche sadak ki taraf (curb se shuru, logon se door)
+    final gateTop = gatePos.dy;
+    final gateRect = Rect.fromLTWH(
+      c.dx - gateHalfW,
+      gateTop,
+      gateHalfW * 2,
+      l.roadTop - gateTop + 2,
+    );
+    canvas.drawRect(gateRect, Paint()..color = const Color(0xFF86889B));
+
+    // 3) Sleti sadak (feeders + loop track) ek sath upar paint
+    canvas.drawPath(leftFeeder, chuteRoad);
+    canvas.drawPath(rightFeeder, chuteRoad);
+    canvas.drawPath(openTrack, roadStroke);
+
+    // Gate corridor ke side curbs aur zebra stripes (outer curb ke bahar)
+    final curbTop = math.min(l.roadTop - 6, gatePos.dy + bw * 0.5 - 1);
+    final curbEdge = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(
+      Offset(gateRect.left, curbTop),
+      Offset(gateRect.left, gateRect.bottom),
+      curbEdge,
+    );
+    canvas.drawLine(
+      Offset(gateRect.right, curbTop),
+      Offset(gateRect.right, gateRect.bottom),
+      curbEdge,
+    );
+
+    final stripe = Paint()
+      ..color = const Color(0x99FFFFFF)
+      ..strokeWidth = 2.2;
+    for (var y = curbTop + 4; y < l.roadTop - 2; y += 5) {
+      canvas.drawLine(
+        Offset(c.dx - gateHalfW * 0.72, y),
+        Offset(c.dx + gateHalfW * 0.72, y),
+        stripe,
+      );
     }
 
-    // Sadak: saaya, safed kinara, phir sleti sadak
+    // 4) Beech ka 3D shape island / hole (har shakal ke mutabiq)
+    final island = l.innerIslandPath;
     canvas.drawPath(
-      l.queueRoad.shift(const Offset(0, 3)),
-      Paint()
-        ..color = const Color(0x22000000)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = l.bandWidth + 8
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round,
+      island.shift(const Offset(0, 2)),
+      Paint()..color = const Color(0x28000000),
     );
+    canvas.drawPath(island, Paint()..color = const Color(0xFFEEF1F8));
+    canvas.save();
+    canvas.clipPath(island);
     canvas.drawPath(
-      l.queueRoad,
+      island.shift(const Offset(0, 3)),
+      Paint()
+        ..color = const Color(0x181B2745)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5,
+    );
+    canvas.restore();
+    canvas.drawPath(
+      island,
       Paint()
         ..color = Colors.white
         ..style = PaintingStyle.stroke
-        ..strokeWidth = l.bandWidth + 8
-        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 3.5
         ..strokeJoin = StrokeJoin.round,
     );
-    canvas.drawPath(
-      l.queueRoad,
-      Paint()
-        ..color = const Color(0xFF898A9B)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = l.bandWidth
-        ..strokeCap = StrokeCap.butt
-        ..strokeJoin = StrokeJoin.round,
+
+    // 5) Track ke dono konon par do gol darakht/bushes (har shakal se bahar)
+    final bushSize = l.passengerSize * 0.9;
+    final bushX = math.min(
+      l.width * 0.44,
+      l.shapeHalfW + bw * 0.5 + bushSize * 1.15,
     );
+    final bushY = math.min(
+      l.roadTop - bushSize * 1.1,
+      c.dy + (l.shapeHalfH + bw * 0.5) * 0.75,
+    );
+    _prop(canvas, 'topiary', Offset(c.dx - bushX, bushY), bushSize);
+    _prop(canvas, 'topiary', Offset(c.dx + bushX, bushY), bushSize);
   }
 
-  /// Shehar ki zameen: pakke sheharon mein footpath ki tiles, hare sheharon
-  /// mein ghaas ke gucche (ek hi dafa banti hai, static layer)
+  /// Shehar ki zameen: clean checkered tiles (Image 2 reference jaisa)
   static void _groundTexture(Canvas canvas, GameLayout l, City city) {
     final area = Rect.fromLTWH(0, 0, l.width, l.roadTop);
-    final grassy = switch (city) {
-      City.lahore || City.islamabad || City.london || City.paris => true,
-      _ => false,
-    };
-    final rnd = math.Random(city.index + 5);
-    if (grassy) {
-      final dark = Paint()..color = city.groundDark.withValues(alpha: 0.9);
-      final light = Paint()..color = Colors.white.withValues(alpha: 0.18);
-      for (var i = 0; i < 180; i++) {
-        final p = Offset(
-          rnd.nextDouble() * area.width,
-          rnd.nextDouble() * area.height,
-        );
-        // Chhota ghaas ka guccha: 3 patli patti
-        for (var k = -1; k <= 1; k++) {
-          canvas.drawLine(
-            p,
-            p.translate(k * 2.2, -4.5 - rnd.nextDouble() * 2),
-            dark..strokeWidth = 1.4,
-          );
-        }
-        if (i % 6 == 0) canvas.drawCircle(p.translate(3, -2), 1.6, light);
-      }
-    } else {
-      // Footpath ki tiles: har doosri qataar aadhi khiski hui (eent jaisi)
-      final line = Paint()
-        ..color = city.groundDark.withValues(alpha: 0.55)
-        ..strokeWidth = 1;
-      final tw = l.passengerSize * 1.5;
-      final th = tw * 0.6;
-      var row = 0;
-      for (var y = 0.0; y < area.height; y += th, row++) {
-        canvas.drawLine(Offset(0, y), Offset(area.width, y), line);
-        final shift = row.isEven ? 0.0 : tw / 2;
-        for (var x = shift; x < area.width; x += tw) {
-          canvas.drawLine(Offset(x, y), Offset(x, y + th), line);
-        }
-      }
-      // Kuch tiles thodi gehri (asli farsh jaisa farq)
-      final spot = Paint()..color = city.groundDark.withValues(alpha: 0.35);
-      for (var i = 0; i < 40; i++) {
-        final x = (rnd.nextInt((area.width / tw).ceil() + 1)) * tw;
-        final r = rnd.nextInt((area.height / th).ceil() + 1);
-        final sx = x + (r.isEven ? 0 : tw / 2);
+    final tw = l.passengerSize * 1.6;
+    final th = tw;
+    final dark = Paint()..color = Colors.black.withValues(alpha: 0.035);
+    final light = Paint()..color = Colors.white.withValues(alpha: 0.04);
+    var row = 0;
+    for (var y = 0.0; y < area.height; y += th, row++) {
+      var col = 0;
+      for (var x = 0.0; x < area.width; x += tw, col++) {
         canvas.drawRect(
-          Rect.fromLTWH(sx + 1, r * th + 1, tw - 2, th - 2),
-          spot,
+          Rect.fromLTWH(x, y, tw, th),
+          (row + col).isEven ? dark : light,
         );
       }
     }
   }
 
-  /// Gol darakht: [leaves] na ho to gulabi phoolon wala (Tokyo), warna hara
-  static void _blossomTree(
-    Canvas canvas,
-    Offset c,
-    double r, [
-    (Color, Color)? leaves,
-  ]) {
-    canvas.drawCircle(
-      c.translate(r * 0.15, r * 0.25),
-      r,
-      Paint()..color = Colors.black.withValues(alpha: 0.08),
-    );
-    // Tana
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: c.translate(0, r * 0.45),
-          width: r * 0.22,
-          height: r * 0.7,
-        ),
-        Radius.circular(r * 0.1),
-      ),
-      Paint()..color = const Color(0xFF9A6B4F),
-    );
-    final pink = Paint()..color = leaves?.$1 ?? const Color(0xFFE98CB5);
-    final light = Paint()..color = leaves?.$2 ?? const Color(0xFFFCD7E4);
-    canvas.drawCircle(c.translate(-r * 0.4, 0), r * 0.62, pink);
-    canvas.drawCircle(c.translate(r * 0.4, 0), r * 0.62, pink);
-    canvas.drawCircle(c.translate(0, -r * 0.35), r * 0.7, pink);
-    canvas.drawCircle(c.translate(-r * 0.2, -r * 0.45), r * 0.3, light);
-    canvas.drawCircle(c.translate(r * 0.3, -r * 0.1), r * 0.22, light);
-    final random = math.Random(19);
-    for (var i = 0; i < 38; i++) {
-      final a = random.nextDouble() * math.pi * 2;
-      final d = math.sqrt(random.nextDouble()) * r * 0.86;
-      final point = c + Offset(math.cos(a) * d, math.sin(a) * d - r * 0.15);
-      canvas.drawCircle(
-        point,
-        r * (0.06 + random.nextDouble() * 0.06),
-        i.isEven ? light : pink,
-      );
-    }
-  }
-
-  /// Kaali sadak aur us par seedhe parking bays. [flash] > 0: slots bhare, laal chamak
+  /// Pyari sadak aur compact parking bays. [flash] > 0: slots bhare, laal chamak
   static void _road(
     Canvas canvas,
     GameLayout l,
@@ -579,21 +534,30 @@ class BoardPainter {
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFF747688), Color(0xFF85879B)],
+          colors: [
+            Color(0xFF53586E),
+            Color(0xFF666B83),
+            Color(0xFF5B6077),
+          ],
         ).createShader(road),
     );
-    // Neeche gaadiyon ki lane: safed dashed lakeer (asli sadak jaisi)
-    final dash = Paint()
-      ..color = const Color(0x8CFFFFFF)
-      ..strokeWidth = math.max(2.0, l.cell * 0.06)
-      ..strokeCap = StrokeCap.round;
-    final dashLen = l.cell * 0.45;
-    for (var x = dashLen * 0.5; x < l.width; x += dashLen * 2.2) {
-      canvas.drawLine(Offset(x, l.laneY), Offset(x + dashLen, l.laneY), dash);
-    }
+    // Upar ki taraf halki andaruni gehrai aur chamak
+    canvas.drawRect(
+      Rect.fromLTWH(0, road.top + 3, l.width, 7),
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0x280E1324), Color(0x000E1324)],
+        ).createShader(Rect.fromLTWH(0, road.top + 3, l.width, 7)),
+    );
+    // 3D double-tone curbs (upar aur neeche)
     final curb = Paint()..color = GamePalette.curb;
-    canvas.drawRect(Rect.fromLTWH(0, road.top - 3, l.width, 5), curb);
-    canvas.drawRect(Rect.fromLTWH(0, road.bottom - 2, l.width, 5), curb);
+    final curbShade = Paint()..color = const Color(0xFFB3BCCB);
+    canvas.drawRect(Rect.fromLTWH(0, road.top - 3.5, l.width, 5.5), curb);
+    canvas.drawRect(Rect.fromLTWH(0, road.top + 1.5, l.width, 2), curbShade);
+    canvas.drawRect(Rect.fromLTWH(0, road.bottom - 2.5, l.width, 5.5), curb);
+    canvas.drawRect(Rect.fromLTWH(0, road.bottom + 2, l.width, 2), curbShade);
 
     final open = slotUsed.length;
     for (var i = 0; i < l.slotCenters.length; i++) {
@@ -601,18 +565,45 @@ class BoardPainter {
       canvas.save();
       canvas.translate(c.dx, c.dy);
       canvas.rotate(GameLayout.bayAngle);
-      final bay = RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset.zero, width: l.bayW, height: l.bayH),
-        Radius.circular(l.bayW * 0.10),
+      final bayRect = Rect.fromCenter(
+        center: Offset.zero,
+        width: l.bayW,
+        height: l.bayH,
       );
-      final stroke = math.max(2.0, l.bayW * 0.06);
+      final bay = RRect.fromRectAndRadius(
+        bayRect,
+        Radius.circular(l.bayW * 0.14),
+      );
+      final stroke = math.max(1.8, l.bayW * 0.055);
+      // Bay ke upar wheel-stop line (halka sa 3D look)
+      final stopBar = RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(0, -l.bayH * 0.39),
+          width: l.bayW * 0.62,
+          height: math.max(2.2, l.bayW * 0.08),
+        ),
+        Radius.circular(l.bayW * 0.04),
+      );
+
       if (i == 0 && hasVip) {
-        // Sunehra VIP bay (sirf VIP booster ke liye)
-        canvas.drawRRect(bay, Paint()..color = const Color(0xFF4F4A3A));
+        // Sunehra 3D VIP bay
         canvas.drawRRect(
           bay,
           Paint()
-            ..color = const Color(0xFFFFC23A)
+            ..shader = const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF3E3420), Color(0xFF56472B)],
+            ).createShader(bayRect),
+        );
+        canvas.drawRRect(
+          stopBar,
+          Paint()..color = const Color(0x88FFD54F),
+        );
+        canvas.drawRRect(
+          bay,
+          Paint()
+            ..color = const Color(0xFFFFCA3A)
             ..style = PaintingStyle.stroke
             ..strokeWidth = stroke * 1.3,
         );
@@ -624,31 +615,56 @@ class BoardPainter {
             'VIP',
             Offset.zero,
             l.bayW * 0.42,
-            const Color(0xFFFFC23A),
+            const Color(0xFFFFD54F),
           );
           canvas.restore();
         }
       } else if (i < open) {
-        canvas.drawRRect(bay, Paint()..color = const Color(0x11777E95));
+        canvas.drawRRect(bay, Paint()..color = const Color(0x38202434));
+        canvas.drawRRect(
+          stopBar,
+          Paint()..color = const Color(0x55FFFFFF),
+        );
         canvas.drawRRect(
           bay,
           Paint()
-            ..color = GamePalette.bayLine
+            ..color = Colors.white.withValues(alpha: 0.78)
             ..style = PaintingStyle.stroke
             ..strokeWidth = stroke,
         );
+        if (!slotUsed[i]) {
+          text(
+            canvas,
+            'P',
+            Offset(0, l.bayH * 0.05),
+            l.bayW * 0.42,
+            Colors.white.withValues(alpha: 0.24),
+          );
+        }
       } else {
-        // Band bay: hari dashed lakeer aur "+"
+        // Band bay: emerald tinted pad, dashed border aur saaf "+" badge
+        canvas.drawRRect(bay, Paint()..color = const Color(0x2238D989));
         _dashedRRect(
           canvas,
           bay,
           Paint()
-            ..color = GamePalette.lockedBay
+            ..color = const Color(0xFF7AEFA8)
             ..style = PaintingStyle.stroke
             ..strokeWidth = stroke,
           dash: l.bayW * 0.14,
         );
-        text(canvas, '+', Offset.zero, l.bayW * 0.55, GamePalette.lockedBay);
+        canvas.drawCircle(
+          Offset.zero,
+          l.bayW * 0.24,
+          Paint()..color = const Color(0x447AEFA8),
+        );
+        text(
+          canvas,
+          '+',
+          Offset.zero,
+          l.bayW * 0.46,
+          const Color(0xFFA8F7C6),
+        );
       }
       canvas.restore();
     }
@@ -660,155 +676,85 @@ class BoardPainter {
     }
   }
 
-  /// Lot ka panel (halka, kinare ke saath)
+  /// Lot ka panel: pyara modern courtyard / parking island design
   static void _lot(Canvas canvas, GameLayout l, List<BusData> buses) {
     final r = l.boardPanel;
-    final c = l.cell;
-    // 1) Kinaron par footpath (halki tiles)
-    canvas.drawRect(r, Paint()..color = const Color(0xFFDADDE4));
-    final tile = Paint()
-      ..color = const Color(0x1A5A6378)
-      ..strokeWidth = 1;
-    final ts = math.max(c * 0.7, 14.0);
-    for (var x = r.left; x < r.right; x += ts) {
-      canvas.drawLine(Offset(x, r.top), Offset(x, r.bottom), tile);
-    }
-    for (var y = r.top; y < r.bottom; y += ts) {
-      canvas.drawLine(Offset(r.left, y), Offset(r.right, y), tile);
-    }
-
-    // 2) Asphalt: gaadiyon ki jagah aur un ke nikalne ki lanes (ring ke bahar
-    // tak), upar parking strip se juda hua
-    final lot = Rect.fromLTRB(
-      math.max(r.left, l.ring.left - c * 0.6),
-      r.top,
-      math.min(r.right, l.ring.right + c * 0.6),
-      math.min(r.bottom, l.ring.bottom + c * 0.6),
-    );
-    final lotR = RRect.fromRectAndCorners(
-      lot,
-      bottomLeft: Radius.circular(c * 0.5),
-      bottomRight: Radius.circular(c * 0.5),
-    );
-    // Curb (safed-grey kinara) aur halka saaya
-    canvas.drawRRect(
-      lotR.inflate(c * 0.12).shift(Offset(0, c * 0.06)),
-      Paint()..color = const Color(0x33000000),
-    );
-    canvas.drawRRect(
-      lotR.inflate(c * 0.12),
-      Paint()..color = const Color(0xFFF2F3F6),
-    );
-    canvas.drawRRect(
-      lotR,
+    // 1) Clean soft courtyard gradient (bina kisi white box ke)
+    canvas.drawRect(
+      r,
       Paint()
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFF6E7285), Color(0xFF63677A)],
-        ).createShader(lot),
+          colors: [Color(0xFFD5DEF0), Color(0xFFE3EAF7), Color(0xFFCDD8EC)],
+        ).createShader(r),
     );
-    // Asphalt ki khurdari (pakke random nuqte, ek hi dafa banti hai)
-    final rnd = math.Random(11);
-    final grit = Paint();
-    final dots = (lot.width * lot.height / 140).clamp(0, 2600).toInt();
-    for (var i = 0; i < dots; i++) {
-      grit.color = rnd.nextBool()
-          ? const Color(0x14FFFFFF)
-          : const Color(0x1A000000);
-      canvas.drawCircle(
-        Offset(
-          lot.left + rnd.nextDouble() * lot.width,
-          lot.top + rnd.nextDouble() * lot.height,
-        ),
-        0.6 + rnd.nextDouble() * 1.1,
-        grit,
-      );
-    }
 
-    // 3) Har gaadi ke neeche us ka parking box (safed lakeerein). Gaadi
-    // nikal jaye to khaali box reh jata hai, asli parking jaisa.
-    final stall = Paint()
-      ..color = const Color(0x8CFFFFFF)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(1.4, c * 0.05);
-    final stallFill = Paint()..color = const Color(0x12000000);
-    for (final b in buses) {
-      final p = l.busCenter(b);
-      canvas.save();
-      canvas.translate(p.dx, p.dy);
-      canvas.rotate(b.angle);
-      final box = RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: Offset.zero,
-          width: c * 0.94,
-          height: c * (b.length - 0.04),
-        ),
-        Radius.circular(c * 0.08),
-      );
-      canvas.drawRRect(box, stallFill);
-      canvas.drawRRect(box, stall);
-      canvas.restore();
-    }
-
-    // 4) Footpath par gamle (jahan lot ke bahar jagah ho)
-    final planter = math.min(c * 0.32, 14.0);
-    for (final side in [lot.left - planter * 2.2, lot.right + planter * 2.2]) {
-      if (side - planter < r.left || side + planter > r.right) continue;
-      for (
-        var y = r.top + planter * 3;
-        y < r.bottom - planter;
-        y += planter * 5
-      ) {
-        final o = Offset(side, y);
-        canvas.drawCircle(
-          o.translate(1, 2),
-          planter,
-          Paint()..color = const Color(0x22000000),
-        );
-        canvas.drawCircle(o, planter, Paint()..color = const Color(0xFFB98C66));
-        canvas.drawCircle(
-          o,
-          planter * 0.78,
-          Paint()..color = const Color(0xFF4FA64A),
-        );
-        canvas.drawCircle(
-          o.translate(-planter * 0.25, -planter * 0.25),
-          planter * 0.32,
-          Paint()..color = const Color(0xFF8FD47A),
+    // 2) Halka architectural stone tile weave (bohat subtle taa-ke cars pop karein)
+    final tw = math.max(24.0, l.cell * 0.95);
+    final tileDark = Paint()..color = const Color(0x051A2B4C);
+    final tileLight = Paint()..color = const Color(0x07FFFFFF);
+    var row = 0;
+    for (var y = r.top; y < r.bottom; y += tw, row++) {
+      var col = 0;
+      for (var x = r.left; x < r.right; x += tw, col++) {
+        canvas.drawRect(
+          Rect.fromLTWH(x, y, tw, tw),
+          (row + col).isEven ? tileDark : tileLight,
         );
       }
     }
 
-    // Upar kinare par parking strip ka halka saaya
+    // 3) Maidan ke bahari konon mein chhote bushes/planters (agar jagah khali ho)
+    final pSize = l.cell * 0.52;
+    if (l.ring.left > pSize * 2.2) {
+      _prop(
+        canvas,
+        'bush',
+        Offset(l.ring.left * 0.45, l.ring.top + pSize),
+        pSize,
+      );
+      _prop(
+        canvas,
+        'bush',
+        Offset(l.width - l.ring.left * 0.45, l.ring.bottom - pSize),
+        pSize,
+      );
+    }
+
+    // 4) Parking road ke bilkul neeche halka sa shadow band
     canvas.drawRect(
-      Rect.fromLTWH(r.left, r.top, r.width, 14),
+      Rect.fromLTWH(r.left, r.top, r.width, 16),
       Paint()
         ..shader = const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0x261B3358), Color(0x001B3358)],
-        ).createShader(Rect.fromLTWH(r.left, r.top, r.width, 14)),
+          colors: [Color(0x221B2745), Color(0x001B2745)],
+        ).createShader(Rect.fromLTWH(r.left, r.top, r.width, 16)),
     );
   }
 
-  /// Upar kul baqi passengers ki ginti
+  /// Kul baqi passengers ki ginti (parking ke thora neeche right side par)
   static void countPill(Canvas canvas, GameLayout l, int remaining) {
-    final s = l.passengerSize;
+    final s = math.max(18.0, l.passengerSize);
     final c = l.countPillPos;
+    final wide = remaining >= 1000;
+    final pillW = wide ? s * 4.1 : s * 3.4;
+    final pillH = s * 1.25;
+    final right = c.dx + s * 1.7;
     final pill = RRect.fromRectAndRadius(
-      Rect.fromCenter(center: c, width: s * 3.2, height: s * 1.25),
+      Rect.fromLTRB(right - pillW, c.dy - pillH / 2, right, c.dy + pillH / 2),
       Radius.circular(s * 0.62),
     );
     canvas.drawRRect(
-      pill.shift(const Offset(0, 2)),
-      Paint()..color = const Color(0x33000000),
+      pill.shift(const Offset(0, 2.5)),
+      Paint()..color = const Color(0x35000000),
     );
     canvas.drawRRect(pill, Paint()..color = Colors.white);
     canvas.drawRRect(
       pill,
       Paint()
-        ..color = const Color(0xFFD9C9B0)
+        ..color = const Color(0xFFD0D5E2)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2,
     );
@@ -827,9 +773,9 @@ class BoardPainter {
     text(
       canvas,
       '$remaining',
-      Offset(pill.left + s * 1.95, c.dy),
-      s * 0.62,
-      const Color(0xFF4A3A28),
+      Offset(pill.left + s * 1.15 + (pillW - s * 1.2) * 0.5, c.dy),
+      wide ? s * 0.54 : s * 0.62,
+      const Color(0xFF2A364E),
     );
   }
 

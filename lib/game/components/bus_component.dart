@@ -17,9 +17,10 @@ enum BusMode { grid, driving, flying, parked, departing }
 
 /// Screen par ek bus. Rules GameModel mein hain, yeh sirf dikhati aur animate karti hai.
 class BusComponent extends Component with HasGameReference<BusJamGame> {
-  BusComponent(this.data) : super(priority: 1);
+  BusComponent(this.data, {this.dropDelay = 0}) : super(priority: 1);
 
   final BusData data;
+  final double dropDelay;
   BusMode mode = BusMode.grid;
 
   /// Kis slot ki taraf ja rahi hai / kis slot mein khadi hai (-1 = grid par)
@@ -31,19 +32,34 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
   double _lift = 1;
   double _rotor = 0;
 
+  // Level start drop animation: upar se gir kar apni jaga bounce ke sath baithna
+  double _dropTime = 0;
+  bool _landDustDone = false;
+  static const double _dropDur = 0.42;
+
+  bool get isDropping =>
+      mode == BusMode.grid && _dropTime < dropDelay + _dropDur;
+
   // Hilne (shake) aur uchalne (pop) ke timers
   double _shakeT = 0;
   double _popT = 0;
   static const double _shakeDur = 0.32;
   static const double _popDur = 0.35;
 
-  // Tap par dabna-uchhalna (squash), slot mein pohanch kar bounce, laal chamak
+  // Tap par dabna-uchhalna (squash), slot mein pohanch kar bounce
   double _squashT = 0;
   double _landT = 0;
-  double _flashT = 0;
-  static const double _squashDur = 0.16;
-  static const double _landDur = 0.32;
-  static const double _flashDur = 0.6;
+  static const double _squashDur = 0.08;
+  static const double _landDur = 0.26;
+
+  // Shuffle arrangement transition: purani jagah/angle se nayi jagah/angle tak glide + hop
+  bool _shuffling = false;
+  double _shuffleT = 0;
+  static const double _shuffleDur = 0.36;
+  Offset _shuffleFromPos = Offset.zero;
+  double _shuffleFromAngle = 0;
+
+  bool get isShuffling => mode == BusMode.grid && _shuffling;
 
   // Raste par chalne ka hisaab
   List<Offset> _path = const [];
@@ -52,6 +68,8 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
   double _elapsed = 0;
   double _speed = 0;
   double _startUnit = 0;
+  double _bodyScale = BusData.sizeScale;
+  double _parkSquashY = 1.0;
   double _departT = 0;
   void Function()? _onDone;
 
@@ -99,10 +117,24 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
   /// Rasta band: thoda sa hilo
   void shake() => _shakeT = _shakeDur;
 
-  /// Raste mein rukawat bani gaadi: hilo aur laal chamko
-  void flashRed() {
-    _shakeT = _shakeDur;
-    _flashT = _flashDur;
+  // Takkar lagne wali rukawat gaadi ka dhakka aur wapsi
+  double _recoilT = 0;
+  static const double _recoilDur = 0.34;
+  Offset _recoilDir = Offset.zero;
+
+  bool get isHitRecoiling => _recoilT > 0;
+  bool get isBumping => _bumpT > 0;
+
+  /// Doosri gaadi ki takkar par bina laal hue dhakka aur spring wapsi
+  void hitBy(double dx, double dy) {
+    _recoilDir = Offset(dx, dy);
+    _recoilT = _recoilDur;
+  }
+
+  double get _recoilPush {
+    if (_recoilT <= 0) return 0;
+    final t = 1.0 - _recoilT / _recoilDur;
+    return unit * 0.18 * math.sin(t * math.pi * 2.5) * math.exp(-3.0 * t);
   }
 
   // Takrane (bump) ka hisaab: aage khaali cells tak jao, takrao, wapis aao
@@ -112,39 +144,67 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
   void Function()? _onBumpHit;
   bool _bumpHitDone = false;
 
+  /// Takkar ke lamhe screen par aage ke bumper ka nuqta
+  Offset get bumpImpactPoint {
+    final vUnit = unit * _bodyScale;
+    final frontDist =
+        BusPainter.bodyLength(vUnit, data.length) * 0.46 + _bumpDist * 0.90;
+    return pos.translate(
+      data.fx * frontDist,
+      data.fy * frontDist - vUnit * 0.14,
+    );
+  }
+
   /// Rasta band: [freeUnits] tak aage jao, rukawat se takrao aur wapis aao.
-  /// Takrane ke lamhe [onHit] chalta hai (maslan rukawat wali gaadi ko hilana).
+  /// Takrane ke lamhe [onHit] chalta hai.
   void bump(double freeUnits, {void Function()? onHit}) {
     if (_bumpT > 0) return;
-    // Bilkul saath khadi rukawat par bhi bump saaf nazar aaye
-    _bumpDist = (math.max(freeUnits, 0.22) + 0.12) * game.layout.cell;
-    _bumpDur = 0.22 + freeUnits * 0.07;
+    // Bilkul saath khadi rukawat par bhi bump aur wapsi saaf nazar aaye
+    _bumpDist = (math.max(freeUnits, 0.22) + 0.10) * game.layout.cell;
+    _bumpDur = 0.24 + math.min(freeUnits, 3.0) * 0.045;
     _bumpT = _bumpDur;
     _onBumpHit = onHit;
     _bumpHitDone = false;
   }
 
-  /// Takrane ki animation mein aage kitna gaye (0..1..0)
+  /// Takrane ki animation mein aage kitna gaye (0 -> _bumpDist -> 0)
   double get _bumpOffset {
     if (_bumpT <= 0) return 0;
     final t = 1 - _bumpT / _bumpDur; // 0 se 1
-    // 55% waqt aage jana (tez hota hua), baqi wapis aana
-    if (t < 0.55) {
-      final u = t / 0.55;
+    // 45% waqt tez aage ja kar takrana, 55% waqt spring ki tarah wapis apni jaga
+    if (t < 0.45) {
+      final u = t / 0.45;
       return _bumpDist * u * u;
     }
-    final u = (t - 0.55) / 0.45;
-    return _bumpDist * (1 - u) * (1 - u * 0.2);
+    final u = (t - 0.45) / 0.55;
+    if (u < 0.72) {
+      final v = u / 0.72;
+      return _bumpDist * (1.0 - v * (2.0 - v));
+    }
+    return -math.min(_bumpDist * 0.07, unit * 0.05) *
+        math.sin((u - 0.72) / 0.28 * math.pi);
   }
 
   /// Shuffle ke waqt chhota sa uchhalna
   void pop() => _popT = _popDur;
 
-  /// Sadak se ghoom kar slot tak jao
+  /// Shuffle par purani jagah/rukh se nayi arrangement ki taraf smooth glide + hop
+  void shuffleArrangeFrom(Offset oldPos, double oldAngle) {
+    _dropTime = dropDelay + _dropDur;
+    _landDustDone = true;
+    _shuffleFromPos = oldPos;
+    _shuffleFromAngle = oldAngle;
+    _shuffleT = 0;
+    _shuffling = true;
+    _popT = _popDur;
+    priority = 4;
+  }
+
+  /// Sadak se ghoom kar tez raftaar se slot tak jao
   void driveTo(int slotIndex, List<Offset> path, void Function() onDone) {
     // Kone gol: asli gaadi ki tarah narm mod le
     final path2 = _smoothPath(path, game.layout.cell * 1.1);
-    _startMove(slotIndex, path2, game.layout.cell * 17, onDone);
+    _startMove(slotIndex, path2, game.layout.cell * 28, onDone);
     mode = BusMode.driving;
     _squashT = _squashDur;
   }
@@ -154,7 +214,7 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
     _startMove(
       slotIndex,
       [pos, game.layout.slotCenters[slotIndex]],
-      game.layout.cell * 8,
+      game.layout.cell * 14,
       onDone,
     );
     mode = BusMode.flying;
@@ -181,7 +241,7 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
   }
 
   /// Bhari hui gaadi: pehle bay se reverse ho kar mudti hai (yahan slot khaali
-  /// ho jaata hai), phir raftaar pakar kar sadak par screen se bahar nikal jaati hai
+  /// ho jaata hai), phir tez raftaar pakar kar sadak par screen se bahar nikal jaati hai
   void depart(void Function() onDone) {
     mode = BusMode.departing;
     _departT = 0;
@@ -197,13 +257,14 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
     );
     _revAngle = angle;
     // Rawangi par peeche se dhuein ke gole
-    final back = BusPainter.bodyLength(unit, data.length) / 2;
+    final vUnit = unit * _bodyScale;
+    final back = BusPainter.bodyLength(vUnit, data.length) * _parkSquashY / 2;
     for (var k = 0; k < 4; k++) {
       final tail = pos.translate(
-        -math.sin(angle) * back + (k - 1.5) * unit * 0.18,
-        math.cos(angle) * back + k * unit * 0.05,
+        -math.sin(angle) * back + (k - 1.5) * vUnit * 0.18,
+        math.cos(angle) * back + k * vUnit * 0.05,
       );
-      game.add(SmokePuff(tail, unit * (0.35 + k * 0.06)));
+      game.add(SmokePuff(tail, vUnit * (0.35 + k * 0.06)));
     }
   }
 
@@ -211,37 +272,77 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
   void update(double dt) {
     super.update(dt);
     final l = game.layout;
-    if (_shakeT > 0) _shakeT -= dt;
-    if (_popT > 0) _popT -= dt;
-    if (_landT > 0) _landT -= dt;
-    if (_flashT > 0) _flashT -= dt;
-    if (_boardT > 0) _boardT -= dt;
-    if (_doorHold > 0) _doorHold -= dt;
+    if (_shakeT > 0) _shakeT = math.max(0.0, _shakeT - dt);
+    if (_recoilT > 0) _recoilT = math.max(0.0, _recoilT - dt);
+    if (_popT > 0) _popT = math.max(0.0, _popT - dt);
+    if (_landT > 0) _landT = math.max(0.0, _landT - dt);
+    if (_boardT > 0) _boardT = math.max(0.0, _boardT - dt);
+    if (_doorHold > 0) _doorHold = math.max(0.0, _doorHold - dt);
     final doorTarget = _doorHold > 0 && mode == BusMode.parked ? 1.0 : 0.0;
     _door += (doorTarget - _door) * math.min(1.0, dt * 14);
     if (_bumpT > 0) {
-      _bumpT -= dt;
-      if (!_bumpHitDone && 1 - _bumpT / _bumpDur >= 0.55) {
+      _bumpT = math.max(0.0, _bumpT - dt);
+      if (!_bumpHitDone && 1 - _bumpT / _bumpDur >= 0.45) {
         _bumpHitDone = true;
+        _boardT = _boardDur;
         _onBumpHit?.call();
       }
     }
 
     switch (mode) {
       case BusMode.grid:
-        // Screen ka size badle to bhi sahi jagah par rahe
-        pos = l.busCenter(data);
-        angle = data.angle;
+        // Screen ka size badle to bhi sahi jagah par rahe; shuffle ho to smooth glide
+        final targetPos = l.busCenter(data);
+        if (_shuffling) {
+          _shuffleT += dt;
+          final p = (_shuffleT / _shuffleDur).clamp(0.0, 1.0);
+          final e = p < 0.5
+              ? 4 * p * p * p
+              : 1 - math.pow(-2 * p + 2, 3) / 2;
+          pos = Offset.lerp(_shuffleFromPos, targetPos, e)!;
+          angle = _lerpAngle(_shuffleFromAngle, data.angle, e);
+          if (p >= 1.0) {
+            _shuffling = false;
+            pos = targetPos;
+            angle = data.angle;
+            priority = 1;
+          }
+        } else {
+          pos = targetPos;
+          angle = data.angle;
+        }
         unit = l.cell;
+        _bodyScale = BusData.sizeScale;
+        _parkSquashY = 1.0;
+        _dropTime += dt;
+        final touchDown = dropDelay + _dropDur * 0.66;
+        if (!_landDustDone && _dropTime >= touchDown) {
+          _landDustDone = true;
+          game.add(
+            SmokePuff(
+              pos.translate(-unit * 0.28, unit * 0.14),
+              unit * 0.24,
+            ),
+          );
+          game.add(
+            SmokePuff(
+              pos.translate(unit * 0.28, unit * 0.14),
+              unit * 0.24,
+            ),
+          );
+          game.playCarLandSound();
+        }
       case BusMode.parked:
         // Extra slot khulne par slots khisakte hain, bus aaram se nayi jagah jaye
         final k = math.min(1.0, dt * 12);
         pos = Offset.lerp(pos, l.slotCenters[slot], k)!;
         unit += (l.slotUnitFor(data.length) - unit) * k;
+        _bodyScale += (1.0 - _bodyScale) * k;
+        _parkSquashY += (l.slotLengthScale(data.length) - _parkSquashY) * k;
         angle = _lerpAngle(angle, GameLayout.bayAngle, k);
       case BusMode.driving:
       case BusMode.flying:
-        _advance(dt, l.slotUnitFor(data.length));
+        _advance(dt, l.slotUnitFor(data.length), l.slotLengthScale(data.length));
       case BusMode.departing:
         _updateDepart(dt, l);
     }
@@ -290,11 +391,14 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
   Offset _revFrom = Offset.zero;
   Offset _revTo = Offset.zero;
   double _revAngle = 0;
-  static const double _reverseDur = 0.38;
+  static const double _reverseDur = 0.24;
 
   void _updateDepart(double dt, GameLayout l) {
+    final rk = math.min(1.0, dt * 8);
+    _bodyScale += (BusData.sizeScale - _bodyScale) * rk;
+    _parkSquashY += (1.0 - _parkSquashY) * rk;
     if (_departT < 1) {
-      // 1) Reverse: aahista peeche, aur peechla hissa nikalne ki taraf ghoomta hai
+      // 1) Reverse: peeche, aur peechla hissa nikalne ki taraf ghoomta hai
       _departT = math.min(1.0, _departT + dt / _reverseDur);
       final e = _departT * _departT * (3 - 2 * _departT);
       pos = Offset.lerp(_revFrom, _revTo, e)!;
@@ -302,28 +406,29 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
       if (_departT >= 1) _finish(); // slot ab khaali
       return;
     }
-    // 2) Aage: sadak ke rukh mein mud kar raftaar pakdo
+    // 2) Aage: sadak ke rukh mein mud kar tez raftaar pakdo
     _driveT += dt;
-    angle = _lerpAngle(angle, _exitSign * math.pi / 2, math.min(1.0, dt * 7));
-    final v = unit * (1.5 + 26 * _driveT);
+    angle = _lerpAngle(angle, _exitSign * math.pi / 2, math.min(1.0, dt * 12));
+    final v = unit * (3.5 + 42 * _driveT);
     pos = Offset(
       pos.dx + math.sin(angle) * v * dt,
       pos.dy -
           math.cos(angle) * v * dt +
-          (l.laneY - pos.dy) * math.min(1.0, dt * 5),
+          (l.laneY - pos.dy) * math.min(1.0, dt * 7),
     );
+    final vUnit = unit * _bodyScale;
     _smokeT -= dt;
     if (_smokeT <= 0) {
-      _smokeT = 0.06;
-      final back = BusPainter.bodyLength(unit, data.length) / 2;
+      _smokeT = 0.05;
+      final back = BusPainter.bodyLength(vUnit, data.length) * _parkSquashY / 2;
       game.add(
         SmokePuff(
           pos.translate(-math.sin(angle) * back, math.cos(angle) * back),
-          unit * 0.3,
+          vUnit * 0.3,
         ),
       );
     }
-    final margin = BusPainter.bodyLength(unit, data.length);
+    final margin = BusPainter.bodyLength(vUnit, data.length);
     if (pos.dx < -margin || pos.dx > l.width + margin) removeFromParent();
   }
 
@@ -350,7 +455,7 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
     return out;
   }
 
-  void _advance(double dt, double endUnit) {
+  void _advance(double dt, double endUnit, double endParkSquash) {
     // Pehle halka sa dab kar uchhlo, phir chalo
     if (_squashT > 0) {
       _squashT -= dt;
@@ -361,22 +466,22 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
     _smokeT -= dt;
     if (mode == BusMode.driving && _smokeT <= 0) {
       _smokeT = 0.05;
-      final back = BusPainter.bodyLength(unit, data.length) / 2;
+      final vUnit = unit * _bodyScale;
+      final back = BusPainter.bodyLength(vUnit, data.length) * _parkSquashY / 2;
       final tail = pos.translate(
         -math.sin(angle) * back,
         math.cos(angle) * back,
       );
-      game.add(SmokePuff(tail, unit * 0.32));
+      game.add(SmokePuff(tail, vUnit * 0.32));
     }
-    // Asli driver jaisi raftaar: shuru mein aahista, parking se pehle brake,
-    // aur tez mod par thoda dheema
-    final start = math.min(1.0, 0.25 + _elapsed * 2.6);
-    final brakeDist = unit * 3.2;
+    // Tez driver jaisi raftaar: jaldi pick up aur tez mod par smooth control
+    final start = math.min(1.0, 0.55 + _elapsed * 4.5);
+    final brakeDist = unit * 2.0;
     final brake = mode == BusMode.driving
-        ? ((_total - _dist) / brakeDist).clamp(0.28, 1.0)
+        ? ((_total - _dist) / brakeDist).clamp(0.50, 1.0)
         : 1.0;
     final turn = mode == BusMode.driving
-        ? 1 - 0.45 * (_turnAhead().abs() / 1.2).clamp(0.0, 1.0)
+        ? 1 - 0.25 * (_turnAhead().abs() / 1.2).clamp(0.0, 1.0)
         : 1.0;
     _dist = math.min(_total, _dist + _speed * start * brake * turn * dt);
     final progress = _total == 0 ? 1.0 : _dist / _total;
@@ -400,20 +505,26 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
 
     if (mode == BusMode.flying) {
       unit = _startUnit + (endUnit - _startUnit) * progress;
-      angle = _lerpAngle(angle, GameLayout.bayAngle, math.min(1.0, dt * 4));
+      _bodyScale = BusData.sizeScale + (1.0 - BusData.sizeScale) * progress;
+      _parkSquashY = 1.0 + (endParkSquash - 1.0) * progress;
+      angle = _lerpAngle(angle, GameLayout.bayAngle, math.min(1.0, dt * 8));
       _lift = 1 + 0.35 * math.sin(math.pi * progress);
-      _rotor += dt * 25;
+      _rotor += dt * 32;
     } else {
-      // Slot ke qareeb aakar chhoti ho jaye
-      final shrink = ((progress - 0.75) / 0.25).clamp(0.0, 1.0);
+      // Slot ke qareeb aakar bay ke hisaab se poori fit ho jaye
+      final shrink = ((progress - 0.72) / 0.28).clamp(0.0, 1.0);
       unit = _startUnit + (endUnit - _startUnit) * shrink;
-      angle = _lerpAngle(angle, segAngle, math.min(1.0, dt * 14));
+      _bodyScale = BusData.sizeScale + (1.0 - BusData.sizeScale) * shrink;
+      _parkSquashY = 1.0 + (endParkSquash - 1.0) * shrink;
+      angle = _lerpAngle(angle, segAngle, math.min(1.0, dt * 20));
     }
 
     if (_dist >= _total) {
       pos = _path.last;
       angle = GameLayout.bayAngle;
       unit = endUnit;
+      _bodyScale = 1.0;
+      _parkSquashY = endParkSquash;
       _lift = 1;
       mode = BusMode.parked;
       priority = 5;
@@ -465,18 +576,74 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
 
   @override
   void render(Canvas canvas) {
+    if (mode == BusMode.grid && _dropTime < dropDelay) return;
+
     var offset = pos;
     if (mode == BusMode.grid && _bumpT > 0) {
       final b = _bumpOffset;
       offset = offset.translate(data.fx * b, data.fy * b);
     }
+    if (_recoilT > 0) {
+      final p = _recoilPush;
+      offset = offset.translate(_recoilDir.dx * p, _recoilDir.dy * p);
+    }
     if (_shakeT > 0) {
       // Aage peeche hilna (jidhar munh hai)
-      final amp = unit * 0.09 * (_shakeT / _shakeDur);
-      final s = math.sin(_shakeT * 60) * amp;
+      final amp = unit * 0.08 * (_shakeT / _shakeDur);
+      final s = math.sin(_shakeT * 55) * amp;
       offset = offset.translate(data.fx * s, data.fy * s);
     }
-    var scale = _lift;
+
+    var scaleX = _lift;
+    var scaleY = _lift;
+    var dropHeight = 0.0;
+    var airAlpha = 1.0;
+    var shadowScale = 1.0;
+    var shadowAlpha = 0.21;
+
+    if (mode == BusMode.grid && _dropTime < dropDelay + _dropDur) {
+      final localT = ((_dropTime - dropDelay) / _dropDur).clamp(0.0, 1.0);
+      const split = 0.66;
+      if (localT < split) {
+        final u = localT / split;
+        final fallFrac = u * u;
+        final maxH = math.max(unit * 5.0, game.layout.boardPanel.height * 0.52);
+        dropHeight = maxH * (1.0 - fallFrac);
+        airAlpha = (u / 0.22).clamp(0.0, 1.0);
+        final airScale = 1.0 + 0.12 * (1.0 - fallFrac);
+        scaleX *= airScale;
+        scaleY *= airScale;
+        shadowScale = 0.35 + 0.65 * fallFrac;
+        shadowAlpha = 0.05 + 0.16 * fallFrac;
+      } else {
+        final b = (localT - split) / (1.0 - split);
+        if (b < 0.30) {
+          final squash = math.sin((b / 0.30) * math.pi);
+          scaleX *= 1.0 + 0.09 * squash;
+          scaleY *= 1.0 - 0.11 * squash;
+        } else {
+          final h = (b - 0.30) / 0.70;
+          dropHeight = unit * 0.18 * math.sin(h * math.pi) * (1.0 - 0.25 * h);
+        }
+      }
+    }
+    if (mode == BusMode.grid && _shuffling) {
+      final p = (_shuffleT / _shuffleDur).clamp(0.0, 1.0);
+      final arc = math.sin(math.pi * p);
+      dropHeight = math.max(dropHeight, unit * 0.48 * arc);
+      scaleX *= 1.0 + 0.12 * arc;
+      scaleY *= 1.0 + 0.12 * arc;
+      shadowScale *= 1.0 - 0.14 * arc;
+      shadowAlpha *= 1.0 - 0.25 * arc;
+    }
+
+    var scale = 1.0;
+    if (_recoilT > 0) {
+      final rt = 1.0 - _recoilT / _recoilDur;
+      if (rt < 0.5) {
+        scale *= 1.0 - 0.06 * math.sin((rt / 0.5) * math.pi);
+      }
+    }
     if (_popT > 0) {
       scale *= 1 + 0.18 * math.sin(math.pi * (1 - _popT / _popDur));
     }
@@ -492,41 +659,46 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
       // Sawari baithi: suspension halka sa dabta hai
       scale *= 1 - 0.035 * math.sin(math.pi * (1 - _boardT / _boardDur));
     }
+    scaleX *= scale;
+    scaleY *= scale;
 
+    final vUnit = unit * _bodyScale;
     final sprite = SpriteBank.instance.vehicle(data.length, data.color, angle);
     canvas.save();
     canvas.translate(offset.dx, offset.dy);
     if (sprite != null) {
       if (SpriteBank.instance.usesNativeVehicles) {
         canvas.save();
-        canvas.scale(scale);
-        canvas.translate(unit * .04, unit * .10);
+        canvas.scale(shadowScale * scale, shadowScale * scale);
+        canvas.translate(vUnit * .04, vUnit * .10);
         canvas.scale(1, math.cos(SpriteBank.tilt));
         canvas.rotate(angle);
         canvas.drawRRect(
           RRect.fromRectAndRadius(
             Rect.fromCenter(
               center: Offset.zero,
-              width: unit * .80,
-              height: BusPainter.bodyLength(unit, data.length),
+              width: vUnit * .80,
+              height: BusPainter.bodyLength(vUnit, data.length) * _parkSquashY,
             ),
-            Radius.circular(unit * .15),
+            Radius.circular(vUnit * .15),
           ),
           Paint()
-            ..color = const Color(0x350F1F35)
-            ..maskFilter = MaskFilter.blur(BlurStyle.normal, unit * .10),
+            ..color = Color.fromRGBO(15, 31, 53, shadowAlpha)
+            ..maskFilter = MaskFilter.blur(BlurStyle.normal, vUnit * .10),
         );
         canvas.restore();
       }
+      // Upar se girte waqt body hawa mein (offset.dy - dropHeight), shadow zameen par
+      canvas.translate(0, -dropHeight);
       // 3D tasveer: sahi rukh wali tasveer, bacha hua chhota angle ghuma kar
       final img = sprite.image;
-      final size = SpriteBank.vehicleFrameUnits(data.length) * unit;
+      final size = SpriteBank.vehicleFrameUnits(data.length) * vUnit;
       // Ek-rukh wali tasveer: gaadi ki lambai ke barabar, shakal ke tanasub se
       final Rect dst;
       if (sprite.directional) {
         dst = Rect.fromCenter(center: Offset.zero, width: size, height: size);
       } else {
-        final h = BusPainter.bodyLength(unit, data.length) * 1.06;
+        final h = BusPainter.bodyLength(vUnit, data.length) * 1.06;
         dst = Rect.fromCenter(
           center: Offset.zero,
           width: h * img.width / img.height,
@@ -534,74 +706,72 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
         );
       }
       canvas.save();
-      canvas.scale(scale);
-      if (_pitch.abs() > 0.001) {
-        // Gaadi ki lambai ke rukh mein halka khinchao/dabao
+      canvas.scale(scaleX, scaleY);
+      if (_pitch.abs() > 0.001 || (_parkSquashY - 1.0).abs() > 0.001) {
+        // Gaadi ki lambai ke rukh mein bay fit aur tez/brake dabao (chaurai wahi rahe)
         canvas.rotate(angle);
-        canvas.scale(1, 1 + _pitch);
+        canvas.scale(1, _parkSquashY * (1 + _pitch));
         canvas.rotate(-angle);
       }
       canvas.rotate(sprite.rotation + _lean);
+      final paint = airAlpha >= 0.999
+          ? SpriteBank.paint
+          : (Paint()
+              ..filterQuality = FilterQuality.medium
+              ..color = Color.fromRGBO(255, 255, 255, airAlpha));
       canvas.drawImageRect(
         img,
         Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
         dst,
-        SpriteBank.paint,
+        paint,
       );
-      if (_flashT > 0) {
-        // Laal chamak (sirf gaadi ki shakal par)
-        // Do dafa laal chamak
-        final a = (math.sin(_flashT / _flashDur * math.pi * 2)).abs() * 0.8;
-        canvas.drawImageRect(
-          img,
-          Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
-          dst,
-          Paint()
-            ..colorFilter = ColorFilter.mode(
-              Color.fromRGBO(255, 40, 40, a),
-              BlendMode.srcATop,
-            ),
-        );
-      }
       canvas.restore();
       if (mode == BusMode.driving || mode == BusMode.departing) {
         canvas.save();
-        canvas.scale(scale);
+        canvas.scale(scaleX, scaleY);
         canvas.rotate(_lean);
         _paintWheelSpin(canvas);
         canvas.restore();
       }
       if (mode == BusMode.flying) {
         canvas.save();
-        canvas.translate(0, -unit * 0.6);
+        canvas.translate(0, -vUnit * 0.6);
         canvas.rotate(angle);
         BusPainter.rotor(
           canvas,
-          unit * BusPainter.widthFactor,
-          BusPainter.bodyLength(unit, data.length),
+          vUnit * BusPainter.widthFactor,
+          BusPainter.bodyLength(vUnit, data.length),
           _rotor % (2 * math.pi),
         );
         canvas.restore();
       }
-      if (_door > 0.02 && slot >= 0) _paintDoor(canvas, scale);
+      if (_door > 0.02 && slot >= 0) _paintDoor(canvas, scaleX);
       // Bay mein: kitni seats baaki hain
       if (slot >= 0 && mode == BusMode.parked) {
         _seatBadge(canvas, size);
       }
     } else {
+      canvas.translate(0, -dropHeight);
       canvas.rotate(angle);
-      canvas.scale(scale);
+      canvas.scale(scaleX, scaleY * _parkSquashY);
+      if (airAlpha < 0.999) {
+        canvas.saveLayer(
+          null,
+          Paint()..color = Color.fromRGBO(255, 255, 255, airAlpha),
+        );
+      }
       BusPainter.paint(
         canvas,
         color: GamePalette.bus(data.color),
         colorIndex: data.color,
-        unit: unit,
+        unit: vUnit,
         length: data.length,
         capacity: data.capacity,
         filled: _filledSeats,
         showSeats: slot >= 0,
         rotorAngle: mode == BusMode.flying ? _rotor % (2 * math.pi) : -1,
       );
+      if (airAlpha < 0.999) canvas.restore();
     }
     canvas.restore();
   }
@@ -609,14 +779,15 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
   /// Camera ki taraf wale pahiyon par ghoomte spoke (rim ki chamak). Jagah
   /// Blender model jaisi: x = +-0.45, z = 0.16, aur aage/peeche ke dhure.
   void _paintWheelSpin(Canvas canvas) {
+    final vUnit = unit * _bodyScale;
     final f = Offset(math.sin(angle), -math.cos(angle));
     final r = Offset(math.cos(angle), math.sin(angle));
     final cosT = math.cos(SpriteBank.tilt);
     final sinT = math.sin(SpriteBank.tilt);
     // Gaadi ke apne nuqte (x side, y aage, z oonchai) se screen par
     Offset project(double x, double y, double z) {
-      final p = r * x + f * y;
-      return Offset(p.dx, p.dy * cosT - z * sinT) * unit;
+      final p = r * x + f * (y * _parkSquashY);
+      return Offset(p.dx, p.dy * cosT - z * sinT) * vUnit;
     }
 
     final l = data.length - 0.12;
@@ -627,7 +798,7 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
     ];
     final paint = Paint()
       ..color = const Color(0xCCFFFFFF)
-      ..strokeWidth = math.max(1.0, unit * 0.03)
+      ..strokeWidth = math.max(1.0, vUnit * 0.03)
       ..strokeCap = StrokeCap.round;
     for (final side in const [-1.0, 1.0]) {
       // Sirf woh taraf jo camera (screen ke neeche) ki taraf ho
@@ -657,17 +828,18 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
     canvas.save();
     canvas.translate(local.dx, local.dy);
     canvas.rotate(angle);
-    final w = unit * 0.5 * _door;
-    final h = unit * 0.2;
+    final u = game.layout.badgeUnit;
+    final w = u * 0.5 * _door;
+    final h = u * 0.2;
     final r = RRect.fromRectAndRadius(
       Rect.fromCenter(center: Offset.zero, width: w + 2, height: h),
       Radius.circular(h * 0.35),
     );
     canvas.drawRRect(
-      r.inflate(unit * 0.08),
+      r.inflate(u * 0.08),
       Paint()
         ..color = Color.fromRGBO(255, 214, 102, 0.35 * _door)
-        ..maskFilter = MaskFilter.blur(BlurStyle.normal, unit * 0.1),
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, u * 0.1),
     );
     canvas.drawRRect(r, Paint()..color = const Color(0xFFFFE08A));
     canvas.drawRRect(
@@ -682,13 +854,14 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
 
   /// Bay ke neeche gaadi ke rang wala label: kitni seats abhi baaki hain
   void _seatBadge(Canvas canvas, double size) {
+    final u = game.layout.badgeUnit;
     final left = data.capacity - _filledSeats;
     final tp = TextPainter(
       text: TextSpan(
         text: '$left',
         style: TextStyle(
           color: const Color(0xFFFFFFFF),
-          fontSize: unit * 0.42,
+          fontSize: u * 0.42,
           fontWeight: FontWeight.w900,
           fontFamily: 'Lilita',
           shadows: const [
@@ -698,14 +871,14 @@ class BusComponent extends Component with HasGameReference<BusJamGame> {
       ),
       textDirection: TextDirection.ltr,
     )..layout();
-    final c = Offset(0, game.layout.bayH * 0.68);
+    final c = Offset(0, game.layout.bayH * 0.62);
     final r = RRect.fromRectAndRadius(
       Rect.fromCenter(
         center: c,
-        width: math.max(tp.width + unit * 0.4, unit * 0.9),
-        height: tp.height + unit * 0.06,
+        width: math.max(tp.width + u * 0.4, u * 0.9),
+        height: tp.height + u * 0.06,
       ),
-      Radius.circular(unit * 0.15),
+      Radius.circular(u * 0.15),
     );
     canvas.drawRRect(r, Paint()..color = GamePalette.bus(data.color));
     canvas.drawRRect(

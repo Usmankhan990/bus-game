@@ -1,5 +1,6 @@
-package com.busjam.bus_jam
+package com.codedhouse.citybusjam
 
 import io.flutter.embedding.android.FlutterActivity
 
 class MainActivity : FlutterActivity()
+

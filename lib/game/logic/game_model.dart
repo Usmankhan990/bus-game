@@ -1,6 +1,9 @@
+import 'dart:math' as math;
+
 import '../../models/bus_data.dart';
 import '../../models/level_data.dart';
 import 'geometry.dart';
+import 'level_generator.dart';
 import 'seeded_random.dart';
 import 'solver.dart';
 
@@ -58,7 +61,8 @@ class GameModel {
       ),
       lockedSlots = level.lockedSlots,
       queue = List<int>.of(level.passengers),
-      head = 0;
+      head = 0,
+      _levelNumber = level.level;
 
   GameModel._raw(
     this.hasVip,
@@ -69,8 +73,12 @@ class GameModel {
     this.lockedSlots,
     this.queue,
     this.head,
+    this._levelNumber,
+    this._lastShufflePattern,
   );
 
+  final int _levelNumber;
+  LayoutPattern? _lastShufflePattern;
   final int cols;
   final int rows;
 
@@ -114,6 +122,8 @@ class GameModel {
     lockedSlots,
     List<int>.of(queue),
     head,
+    _levelNumber,
+    _lastShufflePattern,
   );
 
   BusData? busById(int id) {
@@ -209,26 +219,43 @@ class GameModel {
     slots[slot]?.phase = SlotPhase.parked;
   }
 
-  /// Agar line ka pehla passenger kisi khadi gaadi mein baith sakta hai to
-  /// usay line se nikal kar us gaadi ki seat reserve karo aur slot number wapis do.
-  int? startBoarding() {
-    final c = frontColor;
-    if (c == null) return null;
+  /// Kisi rang ki khadi gaadi (jis mein jagah ho) dhoondo
+  int? findParkedSlotForColor(int color) {
     int? best;
     for (var i = 0; i < slots.length; i++) {
       final s = slots[i];
       if (s == null || s.phase != SlotPhase.parked) continue;
-      if (s.color != c || !s.hasRoom) continue;
+      if (s.color != color || !s.hasRoom) continue;
       // Jo gaadi zyada bhari ho usay pehle bharo
       if (best == null ||
           s.filled + s.reserved > slots[best]!.filled + slots[best]!.reserved) {
         best = i;
       }
     }
-    if (best == null) return null;
-    slots[best]!.reserved++;
-    head++;
     return best;
+  }
+
+  /// Khadi gaadi mein is rang ke passenger ki seat reserve karo aur queue se nikal lo
+  int? reserveSeatForColor(int color) {
+    final slot = findParkedSlotForColor(color);
+    if (slot == null) return null;
+    final idx = queue.indexOf(color, head);
+    if (idx == -1) return null;
+    if (idx != head) {
+      final c = queue.removeAt(idx);
+      queue.insert(head, c);
+    }
+    slots[slot]!.reserved++;
+    head++;
+    return slot;
+  }
+
+  /// Agar line ka pehla passenger kisi khadi gaadi mein baith sakta hai to
+  /// usay line se nikal kar us gaadi ki seat reserve karo aur slot number wapis do.
+  int? startBoarding() {
+    final c = frontColor;
+    if (c == null) return null;
+    return reserveSeatForColor(c);
   }
 
   /// Passenger gaadi tak pohanch kar baith gaya. Agar gaadi bhar gayi to true.
@@ -420,6 +447,237 @@ class GameModel {
     return true;
   }
 
+  /// Shuffle booster: grid par khadi gaadiyon ki poori arrangement (positions,
+  /// angles, order aur rang) har bar naye layout pattern ke sath badalta hai.
+  /// Har rang ki seats aur gaadiyon ki lambai ki ginti barabar rehti hai.
+  bool shuffleArrangement(
+    SeededRandom rng, {
+    ({double left, double top, double right, double bottom})? bounds,
+  }) {
+    if (grid.length < 2) return false;
+
+    final before = [for (final b in grid) b.copy()];
+    // Order ascending (innermost = 0 .. outermost = N-1) taa ke har lambai ka
+    // exit sequence queue ke mutabiq mehfooz reh sake
+    final beforeOrdered = List<BusData>.of(before)
+      ..sort((a, b) => a.order.compareTo(b.order));
+    final exactLengths = [for (final b in beforeOrdered) b.length];
+    final exactColors = [for (final b in beforeOrdered) b.color];
+
+    // Har lambai ke liye mojooda rangon ke pools (seats barabar rakhne ke liye)
+    final colorPools = <int, List<int>>{};
+    for (final b in before) {
+      colorPools.putIfAbsent(b.length, () => []).add(b.color);
+    }
+
+    // Har shuffle par pichhle pattern se mukhtalif layout pattern chunein
+    final exclude =
+        _lastShufflePattern ?? LevelGenerator.specFor(_levelNumber).pattern;
+    final patterns = [
+      for (final p in LayoutPattern.values)
+        if (p != exclude) p,
+    ];
+    rng.shuffle(patterns);
+    patterns.add(exclude);
+
+    List<BusData>? fallbackPlaced;
+    LayoutPattern? fallbackPattern;
+
+    // Pehle exact order lengths (bounds ke andar), phir longestFirst fallback
+    final trySpecs =
+        <
+          (
+            LayoutPattern,
+            ({double left, double top, double right, double bottom})?,
+            bool?,
+          )
+        >[
+          for (var i = 0; i < patterns.length; i++)
+            (patterns[i], bounds, null),
+          for (var i = 0; i < patterns.length; i++)
+            (patterns[i], bounds, true),
+          if (bounds != null) ...[
+            for (var i = 0; i < patterns.length; i++)
+              (patterns[i], null, null),
+            for (var i = 0; i < patterns.length; i++)
+              (patterns[i], null, true),
+          ],
+        ];
+
+    for (final (pattern, activeBounds, longestFirst) in trySpecs) {
+      final placed = LevelGenerator.arrangeBuses(
+        cols: cols,
+        rows: rows,
+        lengths: exactLengths,
+        pattern: pattern,
+        rng: rng,
+        bounds: activeBounds,
+        longestFirst: longestFirst,
+      );
+      if (placed == null) continue;
+      if (!_arrangementDiffers(before, placed)) continue;
+
+      // Placed spots par rang aapas mein mix kar ke solvability check karein
+      final spotGroups = <int, List<int>>{};
+      for (var i = 0; i < placed.length; i++) {
+        spotGroups.putIfAbsent(placed[i].length, () => []).add(i);
+      }
+
+      List<int> randomSpotColors() {
+        final out = List<int>.filled(placed.length, 0);
+        for (final entry in spotGroups.entries) {
+          final pool = List<int>.of(colorPools[entry.key]!);
+          rng.shuffle(pool);
+          final idxs = entry.value;
+          for (var k = 0; k < idxs.length; k++) {
+            out[idxs[k]] = pool[k];
+          }
+        }
+        return out;
+      }
+
+      bool checkPlacedSolvable(
+        List<int> spotColors, {
+        int nodeLimit = 2500,
+      }) {
+        final sim = GameModel._raw(
+          hasVip,
+          cols,
+          rows,
+          [
+            for (var i = 0; i < placed.length; i++)
+              placed[i].copy()..color = spotColors[i],
+          ],
+          slots.map((s) => s?.copy()).toList(),
+          lockedSlots,
+          List<int>.of(queue),
+          head,
+          _levelNumber,
+          _lastShufflePattern,
+        );
+        return Solver.canSolve(sim, nodeLimit: nodeLimit);
+      }
+
+      for (var attempt = 0; attempt < 5; attempt++) {
+        final candColors = randomSpotColors();
+        if (fallbackPlaced == null) {
+          fallbackPlaced = [
+            for (var i = 0; i < placed.length; i++)
+              placed[i].copy()..color = candColors[i],
+          ];
+          fallbackPattern = pattern;
+        }
+        if (checkPlacedSolvable(candColors, nodeLimit: 1500)) {
+          _commitArrangement(placed, candColors, pattern);
+          return true;
+        }
+      }
+
+      // Smart colors try karein agar random rangon se early queue block ho rahi ho
+      final smart = _smartColorsFor(placed, spotGroups, colorPools);
+      if (smart != null && checkPlacedSolvable(smart, nodeLimit: 5000)) {
+        _commitArrangement(placed, smart, pattern);
+        return true;
+      }
+
+      // Agar lambai aur exit order wahi tha to asal solvable rangon ke sath check karein
+      if (longestFirst == null &&
+          checkPlacedSolvable(exactColors, nodeLimit: 6000)) {
+        _commitArrangement(placed, exactColors, pattern);
+        return true;
+      }
+
+      if (longestFirst == null) {
+        fallbackPlaced = [
+          for (var i = 0; i < placed.length; i++)
+            placed[i].copy()..color = exactColors[i],
+        ];
+        fallbackPattern = pattern;
+      }
+    }
+
+    if (fallbackPlaced != null && fallbackPattern != null) {
+      _commitArrangement(
+        fallbackPlaced,
+        [for (final b in fallbackPlaced) b.color],
+        fallbackPattern,
+      );
+      return true;
+    }
+
+    // Aakhri sahara: kam az kam rang shuffle karein
+    return shuffleGridColors(rng);
+  }
+
+  static bool _arrangementDiffers(List<BusData> before, List<BusData> after) {
+    if (before.length != after.length || after.isEmpty) return false;
+    var moved = 0;
+    var totalDelta = 0.0;
+    for (final a in after) {
+      var minDelta = double.infinity;
+      for (final b in before) {
+        if (b.length != a.length) continue;
+        final d = math.sqrt(
+          (a.cx - b.cx) * (a.cx - b.cx) + (a.cy - b.cy) * (a.cy - b.cy),
+        );
+        final da = math
+            .atan2(math.sin(a.angle - b.angle), math.cos(a.angle - b.angle))
+            .abs();
+        final delta = d + da * 0.9;
+        if (delta < minDelta) minDelta = delta;
+      }
+      if (minDelta > 0.55) moved++;
+      if (minDelta.isFinite) totalDelta += minDelta;
+    }
+    final minMoved = math.max(1, (after.length * 0.45).ceil());
+    return moved >= minMoved && totalDelta / after.length > 0.50;
+  }
+
+  void _commitArrangement(
+    List<BusData> placed,
+    List<int> spotColors,
+    LayoutPattern pattern,
+  ) {
+    // Har mojooda BusData ko usi lambai ke sab se qareebi naye spot se jorein
+    final oldByLen = <int, List<BusData>>{};
+    final newByLen = <int, List<(BusData, int)>>{};
+    for (final b in grid) {
+      oldByLen.putIfAbsent(b.length, () => []).add(b);
+    }
+    for (var i = 0; i < placed.length; i++) {
+      newByLen.putIfAbsent(placed[i].length, () => []).add((
+        placed[i],
+        spotColors[i],
+      ));
+    }
+
+    for (final len in oldByLen.keys) {
+      final olds = oldByLen[len]!;
+      final candidates = List<(BusData, int)>.of(newByLen[len]!);
+      for (final b in olds) {
+        var bestIdx = 0;
+        var bestDist = double.infinity;
+        for (var i = 0; i < candidates.length; i++) {
+          final spot = candidates[i].$1;
+          final dx = spot.cx - b.cx;
+          final dy = spot.cy - b.cy;
+          final d2 = dx * dx + dy * dy;
+          if (d2 < bestDist) {
+            bestDist = d2;
+            bestIdx = i;
+          }
+        }
+        final chosen = candidates.removeAt(bestIdx);
+        b.cx = chosen.$1.cx;
+        b.cy = chosen.$1.cy;
+        b.angle = chosen.$1.angle;
+        b.order = chosen.$1.order;
+        b.color = chosen.$2;
+      }
+    }
+    _lastShufflePattern = pattern;
+  }
+
   /// Gaadiyan jis order mein nikal sakti hain, usi order mein line ke agle
   /// passengers ke rang do (har lambai ke apne rang ke pool se).
   List<int>? _smartColors(List<int> current, Map<int, List<int>> groups) {
@@ -427,14 +685,36 @@ class GameModel {
       for (final e in groups.entries)
         e.key: e.value.map((i) => current[i]).toList(),
     };
-    final sim = clone();
-    final result = List<int>.of(current);
-    final order = List<int>.generate(grid.length, (i) => i)
-      ..sort((a, b) => grid[b].order.compareTo(grid[a].order));
+    return _smartColorsFor(grid, groups, pools);
+  }
+
+  List<int>? _smartColorsFor(
+    List<BusData> targets,
+    Map<int, List<int>> groups,
+    Map<int, List<int>> poolSource,
+  ) {
+    final pools = <int, List<int>>{
+      for (final e in poolSource.entries) e.key: List<int>.of(e.value),
+    };
+    final sim = GameModel._raw(
+      hasVip,
+      cols,
+      rows,
+      [for (final b in targets) b.copy()],
+      slots.map((s) => s?.copy()).toList(),
+      lockedSlots,
+      List<int>.of(queue),
+      head,
+      _levelNumber,
+      _lastShufflePattern,
+    );
+    final result = [for (final b in targets) b.color];
+    final order = List<int>.generate(targets.length, (i) => i)
+      ..sort((a, b) => targets[b].order.compareTo(targets[a].order));
 
     for (final i in order) {
       sim.settleInstantly();
-      final bus = sim.busById(grid[i].id);
+      final bus = sim.busById(targets[i].id);
       if (bus == null) return null;
       final pool = pools[bus.length]!;
       // Line mein sab se pehle kis rang ki zaroorat hai (jo slots mein nahi)

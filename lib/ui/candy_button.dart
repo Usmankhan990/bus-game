@@ -6,9 +6,8 @@ import '../services/audio_service.dart';
 import '../services/haptic_service.dart';
 import 'theme.dart';
 
-/// "Candy" 3D button: gol kinare, upar chamakdar gradient, neeche gehra mota
-/// kinara (utha hua lagta hai). Dabane par neeche dabta hai, tap sound + haptic.
-/// [onPressed] null ho to grey (band).
+/// "Candy" 3D button: gol kinare, chamakdar 3D gradient, glossy shimmer sweep,
+/// springy press bounce, aur optional gentle pulse animation.
 class CandyButton extends StatefulWidget {
   const CandyButton({
     super.key,
@@ -21,10 +20,11 @@ class CandyButton extends StatefulWidget {
     this.height = 60,
     this.width,
     this.pulse = false,
+    this.shimmer = false,
     this.radius,
   });
 
-  /// Hara (main) button
+  /// Hara (primary) CTA button
   const CandyButton.primary({
     super.key,
     required this.label,
@@ -35,6 +35,7 @@ class CandyButton extends StatefulWidget {
     this.height = 60,
     this.width,
     this.pulse = false,
+    this.shimmer = true,
   }) : color = AppColors.green,
        radius = null;
 
@@ -49,6 +50,7 @@ class CandyButton extends StatefulWidget {
     this.height = 60,
     this.width,
     this.pulse = false,
+    this.shimmer = true,
   }) : color = AppColors.orange,
        radius = null;
 
@@ -56,15 +58,12 @@ class CandyButton extends StatefulWidget {
   final VoidCallback? onPressed;
   final Color color;
   final IconData? icon;
-
-  /// Icon ki jagah koi widget (maslan sikka)
   final Widget? leading;
   final double fontSize;
   final double height;
   final double? width;
-
-  /// Halka sa saans lena (Play button ke liye)
   final bool pulse;
+  final bool shimmer;
   final double? radius;
 
   @override
@@ -74,26 +73,47 @@ class CandyButton extends StatefulWidget {
 class _CandyButtonState extends State<CandyButton>
     with SingleTickerProviderStateMixin {
   bool _down = false;
-  AnimationController? _pulse;
+  late final AnimationController _anim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2400),
+  );
+
+  bool get _wantsAnim =>
+      widget.onPressed != null && (widget.pulse || widget.shimmer);
 
   @override
   void initState() {
     super.initState();
-    if (widget.pulse) {
-      _pulse = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 1100),
-      )..repeat(reverse: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncAnimation());
+  }
+
+  @override
+  void didUpdateWidget(CandyButton old) {
+    super.didUpdateWidget(old);
+    if (old.pulse != widget.pulse ||
+        old.shimmer != widget.shimmer ||
+        (old.onPressed == null) != (widget.onPressed == null)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _syncAnimation());
+    }
+  }
+
+  void _syncAnimation() {
+    if (!mounted) return;
+    if (_wantsAnim) {
+      if (!_anim.isAnimating) _anim.repeat();
+    } else if (_anim.isAnimating) {
+      _anim.stop();
     }
   }
 
   @override
   void dispose() {
-    _pulse?.dispose();
+    _anim.dispose();
     super.dispose();
   }
 
   void _tap() {
+    if (widget.onPressed == null) return;
     AudioService.instance.play(Sfx.button, volume: 0.6);
     HapticService.instance.select();
     widget.onPressed!();
@@ -103,117 +123,154 @@ class _CandyButtonState extends State<CandyButton>
   Widget build(BuildContext context) {
     final enabled = widget.onPressed != null;
     final base = enabled ? widget.color : AppColors.grey;
-    final edge = AppColors.darker(base, 0.35);
-    final h = widget.height;
-    final depth = (h * 0.11).clamp(4.0, 8.0);
-    final r = widget.radius ?? h * 0.36;
-    final push = _down ? depth * 0.75 : 0.0;
+    final top = Color.lerp(base, Colors.white, 0.28)!;
+    final bottom = Color.lerp(base, Colors.black, 0.08)!;
+    final lip = Color.lerp(base, Colors.black, 0.30)!;
+    final r = widget.radius ?? widget.height / 2;
+    const depth = 5.0;
+    final offset = _down ? depth - 1 : 0.0;
 
-    final content = Row(
+    final row = Row(
       mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        if (widget.leading != null) widget.leading!,
-        if (widget.icon != null)
+        if (widget.leading != null) ...[
+          widget.leading!,
+          if (widget.label.isNotEmpty) const SizedBox(width: 8),
+        ] else if (widget.icon != null) ...[
           Icon(
             widget.icon,
             color: Colors.white,
-            size: widget.fontSize * 1.1,
+            size: widget.fontSize * 1.08,
             shadows: const [
-              Shadow(color: Color(0x66000000), offset: Offset(0, 2)),
+              Shadow(color: Color(0x45000000), offset: Offset(0, 1.5)),
             ],
           ),
-        if ((widget.icon != null || widget.leading != null) &&
-            widget.label.isNotEmpty)
-          SizedBox(width: widget.fontSize * 0.3),
+          if (widget.label.isNotEmpty) const SizedBox(width: 8),
+        ],
         if (widget.label.isNotEmpty)
-          Text(
-            widget.label,
-            maxLines: 1,
-            style: AppText.title(
-              widget.fontSize,
-              outline: AppColors.darker(base, 0.5),
+          Flexible(
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.title(
+                widget.fontSize,
+                outlined: widget.fontSize >= 18,
+              ),
             ),
           ),
       ],
     );
 
-    Widget button = GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTapDown: enabled ? (_) => setState(() => _down = true) : null,
-      onTapCancel: enabled ? () => setState(() => _down = false) : null,
-      onTapUp: enabled
-          ? (_) {
-              setState(() => _down = false);
-              _tap();
-            }
-          : null,
-      child: SizedBox(
+    Widget buildBody(double shimmerPhase) {
+      return SizedBox(
         width: widget.width,
-        height: h + depth,
+        height: widget.height + depth,
         child: Stack(
+          clipBehavior: Clip.none,
           children: [
-            // Neeche ka gehra kinara (3D)
-            Positioned.fill(
+            // Bottom 3D lip + soft ambient glow
+            Positioned(
+              left: 0,
+              right: 0,
               top: depth,
+              height: widget.height,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: edge,
+                  color: lip,
                   borderRadius: BorderRadius.circular(r),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x330B1E3A),
-                      blurRadius: 6,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
+                  boxShadow: enabled
+                      ? [
+                          BoxShadow(
+                            color: Color.lerp(
+                              lip,
+                              Colors.black,
+                              0.25,
+                            )!.withValues(alpha: 0.34),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : null,
                 ),
               ),
             ),
+            // Top glossy cap
             AnimatedPositioned(
-              duration: const Duration(milliseconds: 70),
+              duration: const Duration(milliseconds: 90),
+              curve: Curves.easeOutCubic,
               left: 0,
               right: 0,
-              top: push,
-              height: h,
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(r),
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [AppColors.lighter(base, 0.3), base],
-                  ),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.75),
-                    width: 2,
-                  ),
-                ),
+              top: offset,
+              height: widget.height,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(r),
                 child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    // Upar ki chamak ki patti
-                    Positioned(
-                      left: r * 0.5,
-                      right: r * 0.5,
-                      top: h * 0.08,
-                      height: h * 0.2,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.35),
-                          borderRadius: BorderRadius.circular(h),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [top, base, bottom],
+                          stops: const [0.0, 0.55, 1.0],
+                        ),
+                        borderRadius: BorderRadius.circular(r),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.42),
+                          width: 1.4,
                         ),
                       ),
                     ),
-                    Positioned.fill(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: widget.label.isEmpty ? 4 : 14,
-                        ),
-                        child: Center(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: content,
+                    // Top specular glaze
+                    Positioned(
+                      left: r * 0.25,
+                      right: r * 0.25,
+                      top: 3,
+                      height: widget.height * 0.34,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(r),
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.white.withValues(alpha: 0.38),
+                              Colors.white.withValues(alpha: 0.02),
+                            ],
                           ),
                         ),
+                      ),
+                    ),
+                    // Glossy diagonal shimmer sweep
+                    if (enabled && widget.shimmer && shimmerPhase >= 0)
+                      FractionallySizedBox(
+                        widthFactor: 0.42,
+                        alignment: Alignment(
+                          -1.8 + shimmerPhase * 3.6,
+                          0,
+                        ),
+                        child: Transform.rotate(
+                          angle: 0.38,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.white.withValues(alpha: 0.0),
+                                  Colors.white.withValues(alpha: 0.34),
+                                  Colors.white.withValues(alpha: 0.0),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: row,
                       ),
                     ),
                   ],
@@ -222,25 +279,48 @@ class _CandyButtonState extends State<CandyButton>
             ),
           ],
         ),
-      ),
-    );
-
-    final pulse = _pulse;
-    if (pulse != null && enabled) {
-      button = AnimatedBuilder(
-        animation: pulse,
-        builder: (context, child) => Transform.scale(
-          scale: 1 + 0.045 * math.sin(pulse.value * math.pi),
-          child: child,
-        ),
-        child: button,
       );
     }
-    return button;
+
+    final Widget button = _wantsAnim
+        ? AnimatedBuilder(
+            animation: _anim,
+            builder: (_, _) {
+              final v = _anim.value;
+              final shimmerPhase = v < 0.48 ? v / 0.48 : -1.0;
+              final pulseScale = widget.pulse
+                  ? 1.0 + 0.045 * math.sin(v * math.pi * 2)
+                  : 1.0;
+              return Transform.scale(
+                scale: pulseScale,
+                child: buildBody(shimmerPhase),
+              );
+            },
+          )
+        : buildBody(-1.0);
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: widget.label,
+      child: GestureDetector(
+        onTapDown: enabled ? (_) => setState(() => _down = true) : null,
+        onTapUp: enabled ? (_) => setState(() => _down = false) : null,
+        onTapCancel: enabled ? () => setState(() => _down = false) : null,
+        onTap: _tap,
+        child: AnimatedScale(
+          scale: _down ? 0.91 : 1.0,
+          duration: const Duration(milliseconds: 130),
+          curve: Curves.easeOutBack,
+          child: button,
+        ),
+      ),
+    );
   }
 }
 
-/// Chhota gol-kinaron wala sirf-icon candy button (pause, restart, settings)
+/// Gol-kinaron wala chhota icon button (top bar reset / pause waghera) —
+/// shimmer sweep + spring bounce ke sath.
 class CandyIconButton extends StatelessWidget {
   const CandyIconButton({
     super.key,
@@ -248,12 +328,14 @@ class CandyIconButton extends StatelessWidget {
     required this.onPressed,
     this.color = AppColors.blue,
     this.size = 50,
+    this.shimmer = true,
   });
 
   final IconData icon;
   final VoidCallback? onPressed;
   final Color color;
   final double size;
+  final bool shimmer;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -264,7 +346,8 @@ class CandyIconButton extends StatelessWidget {
       color: color,
       height: size,
       fontSize: size * 0.48,
-      radius: size * 0.3,
+      radius: size * 0.32,
+      shimmer: shimmer,
     ),
   );
 }

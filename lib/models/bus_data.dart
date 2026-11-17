@@ -2,11 +2,11 @@ import 'dart:math' as math;
 
 import 'direction.dart';
 
-/// Gaadi ki lambai (size) ke hisaab se seats: chhoti car 4, van 6, lambi bus 10
+/// Gaadi ki lambai (size) ke hisaab se seats: chhoti car 16, van 24, lambi bus 40
 int capacityForLength(int length) => switch (length) {
-  <= 2 => 4,
-  3 => 6,
-  _ => 10,
+  <= 2 => 16,
+  3 => 24,
+  _ => 40,
 };
 
 /// Ek gaadi ka data (sirf maloomat, drawing nahi).
@@ -45,9 +45,9 @@ class BusData {
   );
 
   final int id;
-  final double cx;
-  final double cy;
-  final double angle;
+  double cx;
+  double cy;
+  double angle;
 
   /// Size: 2 = car, 3 = van, 4 = lambi bus
   final int length;
@@ -57,11 +57,14 @@ class BusData {
 
   /// Level banate waqt gaadi kis number par rakhi gayi.
   /// Bari order wali gaadi pehle nikal sakti hai (hal karne ka order ulta hai).
-  final int order;
+  int order;
+
+  /// Board par har gaadi ka size chhota aur saaf rakhne ka scale factor
+  static const double sizeScale = 0.78;
 
   /// Gaadi ki asal lambai aur chaurai (units mein)
-  static const double bodyWidth = 0.78;
-  double get bodyLength => length - 0.12;
+  static const double bodyWidth = 0.78 * sizeScale;
+  double get bodyLength => (length - 0.12) * sizeScale;
 
   /// Kitni seats hain
   int get capacity => capacityForLength(length);

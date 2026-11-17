@@ -127,7 +127,11 @@ Future<void> showRewardPopup(
   Reward r, {
   String title = 'You Got!',
 }) {
-  AudioService.instance.play(Sfx.win);
+  if (r.coins > 0) {
+    AudioService.instance.play(Sfx.coinsCollect);
+  } else {
+    AudioService.instance.play(Sfx.gift);
+  }
   return showGamePopup<void>(
     context,
     (context) => GamePopup(
@@ -590,6 +594,7 @@ class _SpinPopupState extends State<_SpinPopup>
 
   @override
   void dispose() {
+    AudioService.instance.stop(Sfx.spin);
     _c.dispose();
     super.dispose();
   }
@@ -614,8 +619,9 @@ class _SpinPopupState extends State<_SpinPopup>
     }
     _to = _from + 6 * 2 * math.pi + delta;
     setState(() => _spinning = true);
-    AudioService.instance.play(Sfx.busMove);
+    AudioService.instance.play(Sfx.spin, volume: 0.85);
     await _c.forward(from: 0);
+    AudioService.instance.stop(Sfx.spin);
     if (!mounted) return;
     final r = LuckySpin.segments[pick];
     r.give();

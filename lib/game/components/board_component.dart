@@ -7,10 +7,9 @@ import '../bus_jam_game.dart';
 import '../game_layout.dart';
 import '../render/board_painter.dart';
 
-/// Upar kul baqi passengers ki ginti: hujoom ke UPAR draw hoti hai (warna
-/// log pill ko dhak dete hain)
+/// Kul baqi passengers ki ginti wali pill: parking ke thora neeche right side par
 class CountPillComponent extends Component with HasGameReference<BusJamGame> {
-  CountPillComponent() : super(priority: 28);
+  CountPillComponent() : super(priority: 35);
 
   @override
   void render(Canvas canvas) {

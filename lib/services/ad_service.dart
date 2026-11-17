@@ -91,6 +91,9 @@ class AdService {
     try {
       if (!await ConsentInformation.instance.canRequestAds()) return;
       _started = true;
+      await MobileAds.instance.updateRequestConfiguration(
+        RequestConfiguration(maxAdContentRating: MaxAdContentRating.g),
+      );
       await MobileAds.instance.initialize();
       adsReady.value = true;
       _loadInterstitial();

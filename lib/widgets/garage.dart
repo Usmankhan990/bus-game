@@ -97,7 +97,7 @@ class _SkinCardState extends State<_SkinCard> {
     final s = widget.skin;
     if (!p.unlockedSkins.contains(s)) {
       if (!p.unlockSkin(s)) return;
-      AudioService.instance.play(Sfx.win);
+      AudioService.instance.play(Sfx.gift);
     } else {
       p.selectSkin(s);
     }

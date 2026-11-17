@@ -172,28 +172,26 @@ class SpriteBank {
   ///    khud ghuma deta hai. Kenney jaisi top-down car tasveerein aise lagti hain.
   ///
   /// Wapsi: tasveer, aur kitna ghumana hai, aur kya yeh 16-rukh wali hai.
-  VehicleSprite? vehicle(int length, int color, double angle) {
-    const step = 2 * math.pi / directions;
-    final a = angle % (2 * math.pi);
-    final idx = (a / step).round() % directions;
-    // Garage mein chuni hui khaas gaadi (load ho chuki ho to)
+  ui.Image? _directionalImage(int length, int color, int idx) {
     final skin = ProgressService.instance.selectedSkins[length];
     if (skin != null) {
       final img = _images['skin_${skin.id}_${color % 8}_$idx'];
-      if (img != null) {
-        var rest = a - idx * step;
-        if (rest > math.pi) rest -= 2 * math.pi;
-        return VehicleSprite(img, rest, directional: true);
-      }
+      if (img != null) return img;
     }
-    final base = 'vehicle_${length.clamp(2, 4)}_${color % 8}';
-    final img = _images['${base}_$idx'];
+    return _images['vehicle_${length.clamp(2, 4)}_${color % 8}_$idx'];
+  }
+
+  VehicleSprite? vehicle(int length, int color, double angle) {
+    const step = 2 * math.pi / directions;
+    final a = ((angle % (2 * math.pi)) + 2 * math.pi) % (2 * math.pi);
+    final idx = (a / step).round() % directions;
+    final img = _directionalImage(length, color, idx);
     if (img != null) {
       var rest = a - idx * step;
       if (rest > math.pi) rest -= 2 * math.pi;
       return VehicleSprite(img, rest, directional: true);
     }
-    final single = _images[base];
+    final single = _images['vehicle_${length.clamp(2, 4)}_${color % 8}'];
     if (single != null) return VehicleSprite(single, angle, directional: false);
     return null;
   }

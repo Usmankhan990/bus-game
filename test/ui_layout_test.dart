@@ -6,6 +6,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:bus_jam/game/bus_jam_game.dart';
 import 'package:bus_jam/game/render/sprite_bank.dart';
 import 'package:bus_jam/screens/game_screen.dart';
 import 'package:bus_jam/models/city.dart';
@@ -21,6 +22,7 @@ import 'package:bus_jam/widgets/garage.dart';
 import 'package:bus_jam/widgets/home_features.dart';
 import 'package:bus_jam/widgets/overlays.dart';
 import 'package:bus_jam/widgets/settings_panel.dart';
+import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -231,6 +233,38 @@ void main() {
       await _run(t, 2.5);
       expect(find.text('Level 139'), findsOneWidget);
       await _shot(t, '${label}_15_reference_game');
+
+      if (_shotDir.isNotEmpty) {
+        final gw = t.widget<GameWidget<BusJamGame>>(
+          find.byType(GameWidget<BusJamGame>),
+        );
+        final g = gw.game!;
+        final front = g.model.frontColor;
+        // Ek lambi bus (40) VIP se Slot 0 mein, aur alag rang ki 1-2 khuli gaadiyan slots mein
+        final b4 = g.model.grid.firstWhere(
+          (b) => b.length >= 4 && b.color != front,
+          orElse: () => g.model.grid.first,
+        );
+        g.vipMode = true;
+        await t.tapAt(g.layout.busCenter(b4));
+        await _run(t, 0.4);
+        for (final targetLen in [3, 2]) {
+          final mov = g.model
+              .movableBuses()
+              .where((b) => b.length == targetLen && b.color != front)
+              .toList();
+          final pick = mov.isNotEmpty
+              ? mov.first
+              : g.model.movableBuses().firstWhere(
+                  (b) => b.color != front,
+                  orElse: () => g.model.movableBuses().first,
+                );
+          await t.tapAt(g.layout.busCenter(pick));
+          await _run(t, 0.4);
+        }
+        await _run(t, 1.5);
+        await _shot(t, '${label}_16_parked_slots');
+      }
 
       await t.pumpWidget(const SizedBox());
       await _run(t, 0.2);

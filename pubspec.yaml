@@ -1,25 +1,25 @@
-﻿name: bus_jam
+name: bus_jam
 description: "Rang barangi buses ka puzzle game."
 publish_to: 'none'
 version: 1.4.1+19
 
 environment:
-  sdk: ^3.13.5
+  sdk: '>=3.10.0 <4.0.0'
 
 dependencies:
-  flame: ^1.38.2
-  audioplayers: ^6.8.1
+  flame: ^1.20.0
+  audioplayers: ^6.0.0
   flutter:
     sdk: flutter
-  google_mobile_ads: ^9.2.0
-  shared_preferences: ^2.5.6
+  google_mobile_ads: ^5.0.0
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   integration_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
+  flutter_lints: ^5.0.0
 
 flutter:
   uses-material-design: true
@@ -31,8 +31,10 @@ flutter:
     - assets/sprites/
     - assets/sprites/home_bg_v2.png
     - assets/sprites/home_bus_v2.png
+    - assets/sprites/splash_bus_hero.png
     - assets/sprites_v2/
     - assets/icons/
+    - assets/app_icons/
     # Hujoom ke 3D log (tool/blender/make_people.py)
     - assets/people/
 

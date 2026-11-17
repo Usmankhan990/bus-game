@@ -5,10 +5,16 @@ import '../ui/theme.dart';
 /// Level shuru hote hi screen ke beech se guzarti patti ("HARD" / "EASY").
 /// Taps ko nahi rokti (IgnorePointer).
 class LevelBanner extends StatefulWidget {
-  const LevelBanner({super.key, required this.text, required this.color});
+  const LevelBanner({
+    super.key,
+    required this.text,
+    required this.color,
+    this.onFinished,
+  });
 
   final String text;
   final Color color;
+  final VoidCallback? onFinished;
 
   @override
   State<LevelBanner> createState() => _LevelBannerState();
@@ -19,7 +25,18 @@ class _LevelBannerState extends State<LevelBanner>
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1800),
-  )..forward();
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _c.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        widget.onFinished?.call();
+      }
+    });
+    _c.forward();
+  }
 
   @override
   void dispose() {

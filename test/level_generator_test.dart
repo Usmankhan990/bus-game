@@ -1,3 +1,4 @@
+import 'package:bus_jam/game/game_layout.dart';
 import 'package:bus_jam/game/logic/game_model.dart';
 import 'package:bus_jam/game/logic/geometry.dart';
 import 'package:bus_jam/game/logic/level_generator.dart';
@@ -9,8 +10,14 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('Levels 1-300: crash nahi, ginti barabar, solver hal kar leta hai', () {
     final failed = <int>[];
+    final arrangements = <String>{};
     for (var level = 1; level <= 300; level++) {
       final data = LevelGenerator.generate(level);
+      expect(
+        arrangements.add(LevelGenerator.arrangementSignature(data.buses)),
+        isTrue,
+        reason: 'level $level ki arrangement pehle aa chuki hai',
+      );
 
       // Passengers aur seats ki ginti barabar
       expect(
@@ -18,6 +25,17 @@ void main() {
         data.buses.fold<int>(0, (s, b) => s + b.capacity),
         reason: 'level $level',
       );
+
+      // Har 4-logon ki qataar ek hi rang ki ho (16, 24, 40 seats ke hisaab se)
+      expect(data.passengers.length % 4, 0, reason: 'level $level');
+      for (var i = 0; i < data.passengers.length; i += 4) {
+        final c = data.passengers[i];
+        expect(
+          data.passengers.sublist(i, i + 4),
+          [c, c, c, c],
+          reason: 'level $level idx $i',
+        );
+      }
 
       // Har rang: passengers = us rang ki gaadiyon ki seats
       for (var c = 0; c < data.colorCount; c++) {
@@ -48,7 +66,7 @@ void main() {
         );
         for (var j = i + 1; j < boxes.length; j++) {
           expect(
-            boxes[i].overlaps(boxes[j]),
+            boxes[i].overlaps(boxes[j], margin: 0.21),
             isFalse,
             reason: 'level $level gaadi $i aur $j overlap',
           );
@@ -129,6 +147,79 @@ void main() {
       },
     );
 
+    test(
+      'Shuffle arrangement har bar gaadiyon ki positions aur angles nayi banata hai, overlap aur deadlock ke baghair',
+      () {
+        List<String> layoutSignature(GameModel m) {
+          final items = [
+            for (final b in m.grid)
+              '${b.cx.toStringAsFixed(2)},${b.cy.toStringAsFixed(2)},${b.angle.toStringAsFixed(2)},${b.length}',
+          ]..sort();
+          return items;
+        }
+
+        Map<int, int> seatsPerColor(GameModel m) {
+          final out = <int, int>{};
+          for (final b in m.grid) {
+            out[b.color] = (out[b.color] ?? 0) + b.capacity;
+          }
+          return out;
+        }
+
+        const levels = [1, 5, 15, 25, 45, 77];
+        for (final level in levels) {
+          final m = GameModel(LevelGenerator.generate(level));
+          final beforeSeats = seatsPerColor(m);
+          final seen = <String>{layoutSignature(m).join('|')};
+
+          for (var step = 1; step <= 3; step++) {
+            expect(
+              m.shuffleArrangement(SeededRandom(level * 101 + step)),
+              isTrue,
+              reason: 'level $level step $step',
+            );
+            expect(
+              seatsPerColor(m),
+              beforeSeats,
+              reason: 'level $level step $step seats change ho gayin',
+            );
+
+            // Har bar nayi arrangement honi chahiye
+            final sig = layoutSignature(m).join('|');
+            expect(
+              seen.add(sig),
+              isTrue,
+              reason: 'level $level step $step purani arrangement dohraayi gayi',
+            );
+
+            // Zero overlap & inside board
+            final boxes = [for (final b in m.grid) Geo.busBox(b)];
+            for (var i = 0; i < boxes.length; i++) {
+              expect(
+                boxes[i].insideBoard(m.cols, m.rows, pad: 0),
+                isTrue,
+                reason: 'level $level step $step gaadi $i bahar hai',
+              );
+              for (var j = i + 1; j < boxes.length; j++) {
+                expect(
+                  boxes[i].overlaps(boxes[j], margin: 0.21),
+                  isFalse,
+                  reason: 'level $level step $step gaadi $i aur $j overlap',
+                );
+              }
+            }
+
+            // Koi deadlock nahi aur level solvable hai
+            expect(
+              Solver.canSolve(m, nodeLimit: 20000),
+              isTrue,
+              reason: 'level $level step $step solvable nahi',
+            );
+          }
+        }
+      },
+    );
+
     test('Band raste wali bus nahi nikalti, khuli wali nikalti hai', () {
       final data = LevelGenerator.generate(30);
       final m = GameModel(data);
@@ -202,6 +293,9 @@ void main() {
     });
 
     test('Mukhtalif lambai ki gaadiyan aur seats', () {
+      expect(capacityForLength(2), 16);
+      expect(capacityForLength(3), 24);
+      expect(capacityForLength(4), 40);
       final lengths = <int>{};
       for (var level = 20; level < 60; level++) {
         for (final b in LevelGenerator.generate(level).buses) {
@@ -211,5 +305,69 @@ void main() {
       }
       expect(lengths, containsAll([2, 3, 4]));
     });
+
+    test(
+      'Restart variants: wahi arrangement rehti hai, sirf rang shuffle hote hain aur har variant solvable hai',
+      () {
+        for (final level in [1, 2, 8, 10, 15, 45]) {
+          final base = LevelGenerator.generate(level, variant: 0);
+          final baseArr = LevelGenerator.arrangementSignature(base.buses);
+          final seenColors = <String>{
+            [for (final b in base.buses) '${b.id}:${b.color}'].join(','),
+          };
+          for (var variant = 1; variant <= 4; variant++) {
+            final data = LevelGenerator.generate(level, variant: variant);
+            expect(
+              LevelGenerator.arrangementSignature(data.buses),
+              baseArr,
+              reason: 'level $level variant $variant par arrangement badal gayi',
+            );
+            expect(
+              [for (final b in data.buses) b.order],
+              [for (final b in base.buses) b.order],
+            );
+            final colorsSig =
+                [for (final b in data.buses) '${b.id}:${b.color}'].join(',');
+            expect(
+              seenColors.add(colorsSig),
+              isTrue,
+              reason: 'level $level variant $variant rang shuffle nahi hue',
+            );
+            expect(
+              Solver.solveInOrder(data),
+              isTrue,
+              reason: 'level $level variant $variant solvable nahi',
+            );
+          }
+        }
+      },
+    );
+
+    test(
+      'Parking bay mein lambi bus ki chaurai aur count badge size chhote nahi hote',
+      () {
+        final l = GameLayout(
+          width: 400,
+          height: 800,
+          cols: 11,
+          rows: 11,
+          slotPlaces: 8,
+        );
+        final u2 = l.slotUnitFor(2);
+        final u3 = l.slotUnitFor(3);
+        final u4 = l.slotUnitFor(4);
+        expect(u3, u2);
+        expect(u4, u2);
+        expect(l.badgeUnit, greaterThanOrEqualTo(u2));
+        final len2 = (2 - 0.12) * l.slotUnitFor(2) * l.slotLengthScale(2);
+        final len3 = (3 - 0.12) * l.slotUnitFor(3) * l.slotLengthScale(3);
+        final len4 = (4 - 0.12) * l.slotUnitFor(4) * l.slotLengthScale(4);
+        expect(len3, greaterThan(len2 * 1.4));
+        expect(len4, greaterThan(len3 * 1.25));
+        for (final drawnLen in [len2, len3, len4]) {
+          expect(drawnLen, lessThanOrEqualTo(l.bayH * 0.97 + 1e-6));
+        }
+      },
+    );
   });
 }
